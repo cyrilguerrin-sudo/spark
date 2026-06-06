@@ -1,0 +1,341 @@
+package com.example.spark
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.app.admin.DevicePolicyManager
+import android.app.usage.UsageStatsManager
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.graphics.PixelFormat
+import android.graphics.Typeface
+import android.util.Log
+import android.os.Build
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
+import android.provider.Settings
+import android.view.Gravity
+import android.view.View
+import android.view.WindowManager
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
+import androidx.core.app.NotificationCompat
+
+class AppMonitorService : Service() {
+
+    companion object {
+        const val PREFS                  = "spark_monitor"
+        const val KEY_MONITORED          = "monitored_packages"
+        const val KEY_ACTIVE             = "active_sessions"
+        const val KEY_FOCUS_ACTIVE       = "focus_active"
+        const val KEY_FOCUS_PKGS         = "focus_packages"
+        // Timestamp Unix (ms) de fin de session — surveillé par le service
+        // pour déclencher la fin même quand Flutter est en arrière-plan.
+        const val KEY_SESSION_END_TIME   = "session_end_time"
+        const val KEY_SESSION_NETWORK_ID = "session_network_id"
+        const val EXTRA_NETWORK_ID       = "network_id"
+        const val EXTRA_IS_FOCUS         = "is_focus"
+        const val EXTRA_SESSION_ENDED         = "session_ended_network_id"
+        const val KEY_PENDING_SESSION_ENDED   = "pending_session_ended"
+        private const val CHANNEL_ID       = "spark_monitor"
+        private const val NOTIF_ID         = 42
+        private const val CHANNEL_ID_ALERT = "spark_session_alert"
+        private const val NOTIF_ID_ALERT   = 43
+        private const val TAG        = "SparkMonitor"
+        private const val POLL_MS     = 1_000L
+        private const val COOLDOWN_MS = 30_000L  // 30s — couvre le lag UsageStats + durée intention
+
+        val PKG_TO_ID = mapOf(
+            "com.instagram.android"        to "instagram",
+            "com.zhiliaoapp.musically"     to "tiktok",
+            "com.ss.android.ugc.trill"     to "tiktok",
+            "com.google.android.youtube"   to "youtube",
+            "com.twitter.android"          to "twitter",
+            "com.snapchat.android"         to "snapchat",
+            "com.facebook.katana"          to "facebook",
+        )
+    }
+
+    private val handler = Handler(Looper.getMainLooper())
+    private val lastIntercepted = mutableMapOf<String, Long>()
+    private var isPolling = false
+    private var overlayView: View? = null
+    private val wm: WindowManager by lazy { getSystemService(Context.WINDOW_SERVICE) as WindowManager }
+
+    private val pollRunnable = object : Runnable {
+        override fun run() {
+            poll()
+            handler.postDelayed(this, POLL_MS)
+        }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        createChannel()
+        createAlertChannel()
+        startForeground(NOTIF_ID, buildNotif())
+        if (!isPolling) {
+            isPolling = true
+            handler.post(pollRunnable)
+        }
+        return START_STICKY
+    }
+
+    override fun onDestroy() {
+        isPolling = false
+        handler.removeCallbacks(pollRunnable)
+        removeSessionEndOverlay()
+        super.onDestroy()
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    // ── Logique de surveillance ──────────────────────────────────────────────
+
+    private fun poll() {
+        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+        // ── Vérification fin de session (prioritaire sur toute interception) ──
+        val sessionEndTime = prefs.getLong(KEY_SESSION_END_TIME, 0L)
+        if (sessionEndTime > 0L && System.currentTimeMillis() >= sessionEndTime) {
+            val networkId = prefs.getString(KEY_SESSION_NETWORK_ID, "") ?: ""
+            // Effacer immédiatement pour ne pas re-déclencher au prochain poll
+            prefs.edit().putLong(KEY_SESSION_END_TIME, 0L).apply()
+            if (networkId.isNotEmpty()) {
+                handleSessionEnd(networkId)
+            }
+            return
+        }
+
+        val pkg = getForegroundPackage() ?: return
+        if (pkg == packageName) return  // Ignorer Spark lui-même
+
+        val monitored = prefs.getStringSet(KEY_MONITORED, emptySet()) ?: emptySet()
+        if (!monitored.contains(pkg)) return
+
+        val active = prefs.getStringSet(KEY_ACTIVE, emptySet()) ?: emptySet()
+        if (active.contains(pkg)) return
+
+        val now = System.currentTimeMillis()
+        if ((now - (lastIntercepted[pkg] ?: 0L)) < COOLDOWN_MS) return
+
+        val focusActive = prefs.getBoolean(KEY_FOCUS_ACTIVE, false)
+        val focusPkgs   = prefs.getStringSet(KEY_FOCUS_PKGS, emptySet()) ?: emptySet()
+        if (focusActive && !focusPkgs.contains(pkg)) return
+
+        val networkId = PKG_TO_ID[pkg] ?: return
+        lastIntercepted[pkg] = now
+
+        val launchIntent = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+            putExtra(EXTRA_NETWORK_ID, networkId)
+            putExtra(EXTRA_IS_FOCUS, focusActive && focusPkgs.contains(pkg))
+        }
+        startActivity(launchIntent)
+    }
+
+    private fun getForegroundPackage(): String? {
+        val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        val now = System.currentTimeMillis()
+        val stats = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, now - 10_000, now)
+        return stats?.maxByOrNull { it.lastTimeUsed }?.packageName
+    }
+
+    // ── Overlay système — fin de session (prioritaire sur tous constructeurs) ─
+
+    private fun handleSessionEnd(networkId: String) {
+        val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        val component = ComponentName(this, SparkDeviceAdminReceiver::class.java)
+        val isAdmin = dpm.isAdminActive(component)
+
+        if (isAdmin) {
+            getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putString(KEY_PENDING_SESSION_ENDED, networkId)
+                .apply()
+            clearActiveSession(networkId)
+            try {
+                dpm.lockNow()
+            } catch (e: Exception) {
+                Log.e(TAG, "lockNow() EXCEPTION — ${e::class.simpleName}: ${e.message}")
+            }
+            return
+        }
+
+        // Priorité 2 — WindowManager overlay (SYSTEM_ALERT_WINDOW)
+        val canOverlay = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this)
+        if (canOverlay) {
+            showSessionEndOverlay(networkId)
+        } else {
+            // Priorité 3 — notification setFullScreenIntent
+            showSessionEndNotification(networkId)
+        }
+    }
+
+    private fun clearActiveSession(networkId: String) {
+        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val pkgToRemove = PKG_TO_ID.entries.firstOrNull { it.value == networkId }?.key ?: return
+        val active = (prefs.getStringSet(KEY_ACTIVE, emptySet()) ?: emptySet()).toMutableSet()
+        if (active.remove(pkgToRemove)) {
+            prefs.edit().putStringSet(KEY_ACTIVE, active).apply()
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun showSessionEndOverlay(networkId: String) {
+        if (overlayView != null) return
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        else
+            WindowManager.LayoutParams.TYPE_SYSTEM_ALERT
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            type,
+            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        )
+        val view = buildOverlayView(networkId)
+        overlayView = view
+        try {
+            wm.addView(view, params)
+        } catch (e: Exception) {
+            Log.e(TAG, "showSessionEndOverlay: wm.addView() FAILED — ${e::class.simpleName}: ${e.message}")
+            overlayView = null
+            showSessionEndNotification(networkId)
+        }
+    }
+
+    private fun removeSessionEndOverlay() {
+        overlayView?.let {
+            try {
+                wm.removeView(it)
+            } catch (e: Exception) {
+                Log.e(TAG, "removeSessionEndOverlay: ${e.message}")
+            }
+            overlayView = null
+        }
+    }
+
+    private fun buildOverlayView(networkId: String): View {
+        val root = FrameLayout(this).apply {
+            setBackgroundColor(0xFF171A1A.toInt())
+        }
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+        }
+        val title = TextView(this).apply {
+            text = "Ta session est terminée"
+            textSize = 22f
+            setTextColor(0xFFFFFFFF.toInt())
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setPadding(64, 0, 64, 20)
+        }
+        val subtitle = TextView(this).apply {
+            text = "Appuie pour revenir dans Spark"
+            textSize = 14f
+            setTextColor(0xFF888888.toInt())
+            gravity = Gravity.CENTER
+            setPadding(64, 0, 64, 0)
+        }
+        col.addView(title, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
+        col.addView(subtitle, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
+        root.addView(col, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.CENTER
+        ))
+        root.setOnClickListener {
+            val intent = Intent(this, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                putExtra(EXTRA_SESSION_ENDED, networkId)
+            }
+            startActivity(intent)
+            removeSessionEndOverlay()
+        }
+        return root
+    }
+
+    // ── Notification plein écran — fin de session (fallback) ─────────────────
+
+    private fun showSessionEndNotification(networkId: String) {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+            putExtra(EXTRA_SESSION_ENDED, networkId)
+        }
+        val pi = PendingIntent.getActivity(
+            this, NOTIF_ID_ALERT, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notif = NotificationCompat.Builder(this, CHANNEL_ID_ALERT)
+            .setContentTitle("Ta session est terminée")
+            .setContentText("Reviens dans Spark pour conclure.")
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentIntent(pi)
+            .setFullScreenIntent(pi, true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setAutoCancel(true)
+            .build()
+        (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+            .notify(NOTIF_ID_ALERT, notif)
+    }
+
+    // ── Notification foreground ──────────────────────────────────────────────
+
+    private fun createAlertChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val ch = NotificationChannel(
+                CHANNEL_ID_ALERT,
+                "Spark — Fin de session",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Alerte de fin de session Spark"
+                setShowBadge(false)
+            }
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .createNotificationChannel(ch)
+        }
+    }
+
+    private fun createChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val ch = NotificationChannel(CHANNEL_ID, "Spark Monitor", NotificationManager.IMPORTANCE_MIN).apply {
+                description = "Spark surveille tes apps"
+                setShowBadge(false)
+            }
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(ch)
+        }
+    }
+
+    private fun buildNotif(): Notification {
+        val pi = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE
+        )
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Spark actif")
+            .setContentText("Surveillance des apps en cours")
+            .setSmallIcon(android.R.drawable.ic_menu_compass)
+            .setContentIntent(pi)
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .build()
+    }
+}
