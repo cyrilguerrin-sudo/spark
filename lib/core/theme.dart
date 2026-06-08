@@ -26,6 +26,12 @@ class AppColors {
 
   // Bottom nav — rgba(255, 255, 255, 0.05)
   static const Color bottomNavBg = Color(0x0DFFFFFF);
+
+  // Session end screen background
+  static const Color bgSessionEnd = Color(0xFF171A1A);
+
+  // Cream — bouton primaire écran fin de session
+  static const Color cream = Color(0xFFF5EDE0);
 }
 
 class AppRadius {

@@ -52,6 +52,18 @@ class _SparkAppState extends ConsumerState<SparkApp> {
       return;
     }
 
+    if (call.method == 'onAppBlocked') {
+      if (networkId.isEmpty) return;
+      final blockUntilMs = args['blockUntilMs'] as int? ?? 0;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        appRouter.go('/session-end', extra: {
+          'networkId': networkId,
+          'blockedUntilMs': blockUntilMs,
+        });
+      });
+      return;
+    }
+
     if (call.method == 'onAppIntercepted') {
       if (networkId.isEmpty) return;
       final isFocus = args['isFocus'] as bool? ?? false;

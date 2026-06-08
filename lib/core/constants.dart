@@ -3,8 +3,10 @@ class AppDurations {
 
   static const int sessionTimerMaxMinutes = 20;
   static const int sessionTimerMaxMinutesRepeated = 10;
-  static const int continueButtonDelaySeconds = 10;
+  static const int continueButtonDelaySeconds = 20;
   static const int blockDurationMinutes = 30;
+  static const int blockInstaDurationMinutes = 5;
+  static const int continueSessionDurationMinutes = 10;
 }
 
 class AppStrings {
@@ -47,14 +49,22 @@ class AppStrings {
   static const String timerQuestion = 'Combien de temps tu te donnes ?';
   static const String timerLaunch = 'Lancer la session';
 
-  // Fin de session
-  static const String sessionEndTitle = 'Tu as terminé ta session !';
-  static const String sessionEndGuidedExit =
-      'Je me suis perdu, aide moi à sortir !';
-  static const String sessionEndContinue = 'Je suis encore là, continuer.';
-  static const String sessionEndContinueCountdownPrefix =
-      '«continuer» disponible dans ';
+  // Fin de session — mode normal
+  static const String sessionEndTitle =
+      'Tu as terminé ta session !\nEt c\'est à toi de décider de la suite !';
+  static const String sessionEndBlockButton = 'Bloquer Insta 5min';
+  static const String sessionEndBlockSubtitle =
+      'Le temps de déconnecter et de se remettre en mouvement';
+  static const String sessionEndContinue = 'Je suis encore là, continuer';
+  static const String sessionEndContinueSubtitle =
+      '10min supplémentaire pour terminer ce que je devais faire.';
+  static const String sessionEndContinueCountdownPrefix = 'disponible dans ';
   static const String sessionEndContinueCountdownSuffix = 's';
+
+  // Fin de session — mode blocage actif (Instagram bloqué 5min)
+  static const String sessionEndBlockedTitle = 'Instagram est bloqué';
+  static const String sessionEndBlockedButton = 'Ok, je ferme';
+  static const String sessionEndBlockedCountdownPrefix = 'Se débloque dans ';
 
   // Redirection de sortie
   static const String redirectTitle =

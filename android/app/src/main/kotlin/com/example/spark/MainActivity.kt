@@ -21,6 +21,8 @@ class MainActivity : FlutterActivity() {
     private var pendingNetworkId: String? = null
     private var pendingIsFocus: Boolean = false
     private var pendingSessionEndedNetworkId: String? = null
+    private var pendingBlockedNetworkId: String? = null
+    private var pendingBlockUntilMs: Long = 0L
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -121,6 +123,22 @@ class MainActivity : FlutterActivity() {
                         .apply()
                     result.success(null)
                 }
+                "setBlockUntil" -> {
+                    val args = call.arguments as Map<*, *>
+                    val pkg = args["packageName"] as? String ?: ""
+                    val until = when (val raw = args["blockUntilMs"]) {
+                        is Long   -> raw
+                        is Int    -> raw.toLong()
+                        is Double -> raw.toLong()
+                        else      -> 0L
+                    }
+                    getSharedPreferences(AppMonitorService.PREFS, Context.MODE_PRIVATE)
+                        .edit()
+                        .putLong(AppMonitorService.KEY_BLOCK_UNTIL_MS, until)
+                        .putString(AppMonitorService.KEY_BLOCK_PKG, pkg)
+                        .apply()
+                    result.success(null)
+                }
                 "bringToFront" -> {
                     val i = Intent(this, MainActivity::class.java).apply {
                         addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -151,6 +169,14 @@ class MainActivity : FlutterActivity() {
             channel!!.invokeMethod("onSessionEnded", mapOf("networkId" to nid))
             pendingSessionEndedNetworkId = null
         }
+        pendingBlockedNetworkId?.let { nid ->
+            channel!!.invokeMethod("onAppBlocked", mapOf(
+                "networkId" to nid,
+                "blockUntilMs" to pendingBlockUntilMs
+            ))
+            pendingBlockedNetworkId = null
+            pendingBlockUntilMs = 0L
+        }
         pendingNetworkId?.let { nid ->
             channel!!.invokeMethod("onAppIntercepted",
                 mapOf("networkId" to nid, "isFocus" to pendingIsFocus))
@@ -170,6 +196,24 @@ class MainActivity : FlutterActivity() {
                 channel!!.invokeMethod("onSessionEnded", mapOf("networkId" to endedNetworkId))
             } else {
                 pendingSessionEndedNetworkId = endedNetworkId
+            }
+            return
+        }
+
+        // ── App bloquée (5min post-session) ──────────────────────────────────
+        val blockedNetworkId = intent.getStringExtra(AppMonitorService.EXTRA_APP_BLOCKED)
+        if (blockedNetworkId != null) {
+            intent.removeExtra(AppMonitorService.EXTRA_APP_BLOCKED)
+            val blockUntilMs = intent.getLongExtra(AppMonitorService.EXTRA_BLOCK_UNTIL_MS, 0L)
+            intent.removeExtra(AppMonitorService.EXTRA_BLOCK_UNTIL_MS)
+            if (channel != null) {
+                channel!!.invokeMethod("onAppBlocked", mapOf(
+                    "networkId" to blockedNetworkId,
+                    "blockUntilMs" to blockUntilMs
+                ))
+            } else {
+                pendingBlockedNetworkId = blockedNetworkId
+                pendingBlockUntilMs = blockUntilMs
             }
             return
         }

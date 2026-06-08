@@ -1,613 +1,375 @@
 # CLAUDE.md — Spark App
 
-## 1\. CONTEXTE DU PROJET
+## 1. CONTEXTE DU PROJET
 
-Spark est une application mobile Flutter (Android \+ iOS) anti-doomscrolling. Elle intercepte l'ouverture des réseaux sociaux et crée des rituels conscients d'intention, de session et de sortie.
+Spark est une application mobile Flutter (Android + iOS) anti-doomscrolling. Elle intercepte l'ouverture des réseaux sociaux et crée des rituels conscients d'intention, de session et de sortie.
 
 **3 mécanismes core :**
-
-1. Intention à l'ouverture — l'utilisateur choisit pourquoi il ouvre le réseau  
-2. Contrat de session — il fixe une durée avant d'entrer  
+1. Intention à l'ouverture — l'utilisateur choisit pourquoi il ouvre le réseau
+2. Contrat de session — il fixe une durée avant d'entrer
 3. Redirection de sortie — une sortie guidée quand le timer expire
 
 **Mode Spark Focus :**
-
-- L'utilisateur définit un objectif de travail \+ apps à bloquer  
-- Si il tente d'ouvrir une app bloquée → écran de rappel avec sa to-do  
+- L'utilisateur définit un objectif de travail + apps à bloquer
+- Si il tente d'ouvrir une app bloquée → écran de rappel avec sa to-do
 - Il doit cocher son objectif pour débloquer l'accès
 
 ---
 
-## 2\. STACK TECHNIQUE
+## 2. ÉTAT ACTUEL DU PROJET (ce qui fonctionne)
 
-- **Framework** : Flutter (Dart)  
-- **Cible** : Android \+ iOS (compiler sur Mac avec Xcode)  
-- **État** : Provider ou Riverpod (choisir Riverpod pour la scalabilité)  
-- **Storage local** : Hive (rapide, pas de SQL)  
-- **Vidéo flamme** : video\_player  
-- **Animations** : lottie (si export Lottie depuis AE) ou flutter\_animate  
-- **Blocage apps** : android\_intent\_plus \+ usage\_stats (Android) / screen time, family control, intents (IOS)  
-- **Navigation** : go\_router
+### ✅ Implémenté et fonctionnel
+- **Interception Android** : AppMonitorService détecte l'ouverture d'Instagram via UsageStatsManager et lance MainActivity
+- **Écran d'intention** : s'affiche quand l'utilisateur ouvre Instagram, avec les choix spécifiques au réseau
+- **Timer de session natif** : KEY_SESSION_END_TIME écrit dans SharedPreferences, le service poll toutes les secondes
+- **Device Admin / lockNow** : à l'expiration du timer, l'écran se verrouille automatiquement via DevicePolicyManager.lockNow()
+- **Écran de fin de session** : s'affiche après le déverrouillage via KEY_PENDING_SESSION_ENDED
+- **Deeplinks Instagram** : redirection vers le bon onglet selon l'intention choisie
+- **3 permissions** : UsageStats, SYSTEM_ALERT_WINDOW, Device Admin (écran de permissions au premier lancement)
+- **Sauvegarde des réseaux** : les réseaux sélectionnés dans Edit persistent via Hive
+- **Anti-swipe** : mécanisme de cooldown 2s pour ramener l'utilisateur sur Spark si il tente de swiper pendant l'écran d'intention
 
-**pubspec.yaml — dépendances :**
+### ⚠️ En cours / À corriger
+- L'écran de fin de session peut être ignoré (l'utilisateur peut swiper)
+- Après une session, il faut parfois re-toggler Instagram dans Edit pour que l'interception remarche
 
+---
+
+## 3. LOGIQUE DE SESSION — COMPORTEMENT ATTENDU
+
+### Pendant la session
+- Si l'utilisateur **ferme Instagram** (swipe depuis les apps récentes) → la session se termine silencieusement → la prochaine ouverture d'Instagram affichera l'écran d'intention normalement
+- Si l'utilisateur **utilise une autre app** sans fermer Instagram (Instagram en arrière-plan) → la session **continue** normalement, le timer continue de tourner
+
+### Fin de session (timer expire)
+1. L'écran se verrouille automatiquement via `lockNow()`
+2. L'utilisateur rallume l'écran → l'**écran de fin de session** s'affiche
+3. Cet écran est **impossible à ignorer** :
+   - Si l'utilisateur tente de swiper ou de fermer Spark → l'écran se réaffiche automatiquement
+   - Si l'utilisateur tente d'ouvrir Instagram → l'écran d'intention NE s'affiche PAS, l'écran de fin de session se réaffiche à la place
+   - L'écran reste actif tant qu'aucun des deux boutons n'est pressé
+
+### Bouton 1 — "Bloquer Insta 5min"
+- Instagram est bloqué pendant 5 minutes (toute tentative d'ouverture est interceptée sans montrer l'écran d'intention)
+- L'écran de fin de session se ferme
+- La session est terminée
+
+### Bouton 2 — "Je suis encore là, continuer" (disponible après 20s)
+- Lance une nouvelle session de 10 minutes
+- À l'expiration des 10 minutes → même écran de fin de session réapparaît
+- **Exception** : si l'utilisateur ferme Instagram pendant ces 10 minutes → la session se termine silencieusement, l'écran de fin de session ne réapparaît pas
+
+---
+
+## 4. STACK TECHNIQUE
+
+- **Framework** : Flutter (Dart)
+- **Cible** : Android + iOS (compiler sur Mac avec Xcode pour iOS)
+- **État** : Riverpod
+- **Storage local** : Hive
+- **Animations** : flutter_animate
+- **Blocage apps** : android_intent_plus + UsageStatsManager (Android)
+- **Navigation** : go_router
+- **Service natif** : AppMonitorService.kt (foreground service Android)
+- **Device Admin** : SparkDeviceAdminReceiver.kt + device_admin_policies.xml
+
+### pubspec.yaml — dépendances
+```yaml
 dependencies:
-
   flutter:
-
     sdk: flutter
-
   riverpod: ^2.5.1
-
-  flutter\_riverpod: ^2.5.1
-
+  flutter_riverpod: ^2.5.1
   hive: ^2.2.3
-
-  hive\_flutter: ^1.1.0
-
-  video\_player: ^2.8.1
-
-  flutter\_animate: ^4.5.0
-
-  go\_router: ^13.0.0
-
-  android\_intent\_plus: ^4.0.2
-
-  permission\_handler: ^11.3.0
-
-  app\_usage: ^3.0.1
-
+  hive_flutter: ^1.1.0
+  flutter_animate: ^4.5.0
+  go_router: ^13.0.0
+  android_intent_plus: ^4.0.2
+  permission_handler: ^11.3.0
+  app_usage: ^3.0.1
   intl: ^0.19.0
+```
 
 ---
 
-## 3\. DESIGN SYSTEM (extrait du Figma)
+## 5. DESIGN SYSTEM (extrait du Figma)
 
-[https://www.figma.com/design/TxnAKO8YNWFRXeaCN13E4m/Maquette-final-coeur-de-Spark?node-id=0-1\&t=AOy40NaecgGo2bzv-1](https://www.figma.com/design/TxnAKO8YNWFRXeaCN13E4m/Maquette-final-coeur-de-Spark?node-id=0-1&t=AOy40NaecgGo2bzv-1)
+**Figma** : https://www.figma.com/design/TxnAKO8YNWFRXeaCN13E4m/Maquette-final-coeur-de-Spark?node-id=0-1
 
-**Couleurs :**
+### Couleurs
+```dart
+static const Color bgPrimary = Color(0xFF0A0A0A);
+static const Color bgCard = Color(0xFF111111);
+static const Color bgCardBorder = Color(0xFF1E1E1E);
+static const Color green = Color(0xFF268429);
+static const Color greenLight = Color(0xFF4CAF50);
+static const Color red = Color(0xFF843B26);
+static const Color orange = Color(0xFFE05A3A);
+static const Color textPrimary = Color(0xFFFFFFFF);
+static const Color textSecondary = Color(0xFFBBBBBB);
+static const Color textMuted = Color(0xFF555555);
+```
 
-// Fond principal
+### Typographie (Inter)
+```dart
+TextStyle titleLarge = TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w800, fontSize: 32, fontStyle: FontStyle.italic, letterSpacing: -1.6, color: Colors.white);
+TextStyle metricLarge = TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w800, fontSize: 50, letterSpacing: -2.5);
+TextStyle sectionLabel = TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w700, fontSize: 18, letterSpacing: -0.9, color: Color(0xFFBBBBBB));
+TextStyle body = TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w500, fontSize: 14, letterSpacing: -0.7, color: Color(0xFFBBBBBB));
+```
 
-static const Color bgPrimary \= Color(0xFF0A0A0A);
-
-static const Color bgCard \= Color(0xFF111111);
-
-static const Color bgCardBorder \= Color(0xFF1E1E1E);
-
-// Accents
-
-static const Color green \= Color(0xFF268429);      // Grâce à Spark / succès
-
-static const Color greenLight \= Color(0xFF4CAF50); // Sessions respectées
-
-static const Color red \= Color(0xFF843B26);        // Dépassement
-
-static const Color orange \= Color(0xFFE05A3A);     // Focus actif / dépassement
-
-// Texte
-
-static const Color textPrimary \= Color(0xFFFFFFFF);
-
-static const Color textSecondary \= Color(0xFFBBBBBB);
-
-static const Color textMuted \= Color(0xFF555555);
-
-**Typographie (Inter) :**
-
-// Titre principal (ex: "Salut Cyril \!")
-
-TextStyle titleLarge \= TextStyle(
-
-  fontFamily: 'Inter',
-
-  fontWeight: FontWeight.w800,
-
-  fontSize: 32,
-
-  fontStyle: FontStyle.italic,
-
-  letterSpacing: \-1.6,
-
-  color: Colors.white,
-
-);
-
-// Chiffre clé (ex: "2h12")
-
-TextStyle metricLarge \= TextStyle(
-
-  fontFamily: 'Inter',
-
-  fontWeight: FontWeight.w800,
-
-  fontSize: 50,
-
-  letterSpacing: \-2.5,
-
-);
-
-// Label section (ex: "Sessions récentes")
-
-TextStyle sectionLabel \= TextStyle(
-
-  fontFamily: 'Inter',
-
-  fontWeight: FontWeight.w700,
-
-  fontSize: 18,
-
-  letterSpacing: \-0.9,
-
-  color: Color(0xFFBBBBBB),
-
-);
-
-// Corps texte
-
-TextStyle body \= TextStyle(
-
-  fontFamily: 'Inter',
-
-  fontWeight: FontWeight.w500,
-
-  fontSize: 14,
-
-  letterSpacing: \-0.7,
-
-  color: Color(0xFFBBBBBB),
-
-);
-
-**Border radius :**
-
-- Cards : 20px  
-- Boutons : 24px  
-- Bottom nav : 20px  
-- Écran complet : 44px (device frame)
+### Border radius
+- Cards : 20px
+- Boutons : 24px
+- Bottom nav : 20px
+- Écran complet : 44px
 
 ---
 
-## 4\. STRUCTURE DES FICHIERS
+## 6. ARCHITECTURE NATIVE ANDROID
 
+### Fichiers Kotlin
+- `AppMonitorService.kt` — foreground service, poll toutes les secondes, gère l'interception et le timer
+- `MainActivity.kt` — reçoit les intents du service, dispatch vers Flutter via MethodChannel
+- `SparkDeviceAdminReceiver.kt` — receiver Device Admin minimal
+
+### SharedPreferences clés importantes
+```kotlin
+const val KEY_MONITORED = "monitored_pkgs"          // Set<String> des packages surveillés
+const val KEY_ACTIVE = "active_session_pkgs"         // Package en session active
+const val KEY_SESSION_END_TIME = "session_end_time"  // Timestamp fin de session (ms)
+const val KEY_SESSION_NETWORK_ID = "session_network" // networkId en cours ("instagram")
+const val KEY_PENDING_SESSION_ENDED = "pending_session_ended" // Signal pour Flutter
+const val KEY_FOCUS_ACTIVE = "focus_active"
+const val KEY_FOCUS_PKGS = "focus_pkgs"
+const val KEY_LOCK_PKG = "lock_pkg"                  // Anti-swipe pendant intention
+```
+
+### MethodChannel
+- `onAppIntercepted(networkId, isFocus)` → Flutter navigue vers /intention ou /focus-blocked
+- `onSessionEnded(networkId)` → Flutter reset timer + navigue vers /session-end
+- `checkUsagePermission` / `openUsageSettings`
+- `checkOverlayPermission` / `openOverlaySettings`
+- `checkDeviceAdminPermission` / `openDeviceAdminSettings`
+
+---
+
+## 7. STRUCTURE DES FICHIERS
+
+```
 lib/
-
 ├── main.dart
-
-├── app.dart                    \# GoRouter \+ thème global
-
+├── app.dart                    # GoRouter + thème global + _handleNativeCall
 ├── core/
-
-│   ├── theme.dart              \# Couleurs, typo, thème
-
-│   ├── constants.dart          \# Durées, limites
-
-│   └── router.dart             \# Routes nommées
-
+│   ├── theme.dart
+│   ├── constants.dart
+│   └── router.dart
 ├── models/
-
-│   ├── social\_network.dart     \# Nom, icône, limite temps
-
-│   ├── session.dart            \# Durée, intention, timestamp
-
-│   └── focus\_session.dart      \# Objectif, apps bloquées
-
+│   ├── social_network.dart
+│   ├── session.dart
+│   └── focus_session.dart
 ├── providers/
-
-│   ├── sessions\_provider.dart  \# Historique sessions
-
-│   ├── networks\_provider.dart  \# Réseaux activés \+ limites
-
-│   └── focus\_provider.dart     \# État du mode Focus
-
+│   ├── sessions_provider.dart
+│   ├── networks_provider.dart
+│   ├── session_timer_provider.dart
+│   └── focus_provider.dart
 ├── screens/
-
-│   ├── splash\_screen.dart
-
-│   ├── onboarding\_screen.dart
-
-│   ├── dashboard\_screen.dart
-
-│   ├── edit\_screen.dart
-
-│   ├── profil\_screen.dart
-
-│   ├── intention\_screen.dart   \# Popup intention ouverture réseau
-
-│   ├── session\_timer\_screen.dart
-
-│   ├── session\_end\_screen.dart \# "Tu as terminé ta session \!"
-
-│   ├── redirect\_screen.dart    \# Sortie guidée
-
-│   ├── focus\_config\_screen.dart \# Config Spark Focus
-
-│   └── focus\_blocked\_screen.dart \# Interception en mode Focus
-
+│   ├── splash_screen.dart
+│   ├── onboarding_screen.dart
+│   ├── permissions_screen.dart # 3 permissions requises
+│   ├── dashboard_screen.dart
+│   ├── edit_screen.dart
+│   ├── profil_screen.dart
+│   ├── intention_screen.dart
+│   ├── session_timer_screen.dart
+│   ├── session_end_screen.dart
+│   ├── redirect_screen.dart
+│   ├── focus_config_screen.dart
+│   └── focus_blocked_screen.dart
 ├── widgets/
-
-│   ├── flame\_button.dart       \# Flamme animée centrale
-
-│   ├── bottom\_nav.dart         \# Navigation globale
-
-│   ├── session\_card.dart       \# Carte session récente
-
-│   ├── network\_toggle.dart     \# Toggle réseau (Edit)
-
-│   └── time\_slider.dart        \# Slider durée session
-
+│   ├── flame_button.dart
+│   ├── bottom_nav.dart
+│   ├── session_card.dart
+│   ├── network_toggle.dart
+│   ├── time_slider.dart
+│   └── permission_card.dart
 └── services/
-
-    ├── app\_blocker\_service.dart \# Logique blocage Android
-
-    ├── usage\_service.dart       \# Lecture temps d'écran
-
-    └── storage\_service.dart     \# Hive read/write
-
----
-
-## 5\. ÉCRANS ET FLUX DÉTAILLÉS
-
-### ÉCRAN 1 — Splash (spark\_chargement)
-
-- Fond noir `#0A0A0A`  
-- Logo Spark centré (flamme 3D \+ texte "Spark")  
-- Chargement silencieux → redirect vers Dashboard si utilisateur connu, Onboarding si première fois  
-- Asset : `assets/images/spark_logo.png`
+    ├── app_blocker_service.dart
+    ├── monitor_service.dart
+    ├── permission_service.dart
+    ├── usage_service.dart
+    └── storage_service.dart
+```
 
 ---
 
-### ÉCRAN 2 — Onboarding / Permissions
+## 8. ÉCRANS ET FLUX
 
-- Fond noir  
-- Titre centré : **"Pour que Spark fonctionne correctement, il faut activer certaines autorisations"** (Inter Bold, 18px, blanc)  
-- Sous-titre : **"Tes données sont complètement privées et ne quittent pas ton téléphone"** (Inter Medium, 14px, `#BBB`)  
-- Bouton bas : **"Continuer \!"** (bouton blanc, texte noir, border radius 24px, largeur 323px)  
-- Action : demande permission `usage_stats` \+ `BIND_ACCESSIBILITY_SERVICE`
+### ÉCRAN 1 — Splash
+- Fond noir, logo centré
+- Redirect vers Dashboard si utilisateur connu, Permissions si première fois
 
----
+### ÉCRAN 2 — Permissions (premier lancement)
+- 3 cartes avec bouton "Activer" chacune :
+  1. Accès à l'utilisation (UsageStats)
+  2. Affichage par-dessus les apps (SYSTEM_ALERT_WINDOW)
+  3. Administrateur de l'appareil (Device Admin)
+- Bouton "Continuer" désactivé tant que les 3 permissions ne sont pas accordées
+- Section "Autorisations" également accessible depuis l'onglet Profil
 
-### ÉCRAN 3 — Dashboard (écran principal)
+### ÉCRAN 3 — Dashboard
+- Header : "Salut [Prénom] !" (Inter ExtraBold Italic, 32px)
+- Flamme centrale cliquable → focus_config_screen
+- Stats du jour (temps économisé vs sans Spark)
+- Sessions récentes
+- Bottom Nav : Home | Flamme Spark | Profil
 
-**Layout de haut en bas :**
-
-1. **Header** (padding top 48px, horizontal 22px)  
-     
-   - Texte : "Salut \[Prénom\] \!" — Inter ExtraBold Italic, 32px, blanc
-
-   
-
-2. **Flamme centrale** (zone cliquable, centrée)  
-     
-   - Asset vidéo/GIF : `assets/flame/flame_idle.gif` (statique au repos)  
-   - Asset vidéo : `assets/flame/flame_spin.mp4` (au tap — BlendMode.screen)  
-   - Lueur derrière : Container rond, `#FF6600` opacity 0.15, blurRadius 20  
-   - Texte sous la flamme : "Appuie sur la flamme pour lancer le mode Focus" (Inter Medium, 13px, `#BBB`, opacity 0.5, centré)  
-   - **Action tap** : navigate vers `focus_config_screen`
-
-   
-
-3. **Stats du jour** (horizontal 22px, deux cards côte à côte)  
-     
-   - Card gauche : label "Grâce à Spark" \+ chiffre en vert `#268429` (ex: "2h12")  
-   - Card droite : label "Si tu n'avais pas Spark" \+ chiffre en rouge `#843B26` (ex: "3h06")  
-   - Background cards : `rgba(56,56,56,0.2)`, border radius 20px
-
-   
-
-4. **Sessions récentes** (label "Sessions récentes" \+ liste)  
-     
-   - Chaque item : heure \+ nom réseau à gauche, delta temps à droite  
-   - Delta positif (dépassement) : rouge `#843B26`, préfixe "+"  
-   - Delta négatif (respecté) : vert `#268429`  
-   - Background item : `rgba(56,56,56,0.2)`, border radius 20px
-
-   
-
-5. **Bottom Nav** (fixé en bas, fond `rgba(255,255,255,0.05)`, border top blanc)  
-     
-   - 3 icônes : Home (gauche) | Flamme Spark centrée surélevée | Profil (droite)  
-   - Flamme nav \= bouton rond 86px, gradient orange/rouge, icône flamme blanche
-
----
-
-### ÉCRAN 4 — Onglet Edit
-
-**Layout :**
-
-1. Titre : "Sélectionne les réseaux sociaux pour lesquels tu veux que Spark intervienne" (Inter Bold, 18px, blanc, padding 22px)  
-     
-2. **Liste des réseaux** — chaque item (card `rgba(56,56,56,0.2)`, radius 20px) :  
-     
-   - Nom du réseau à gauche (Inter SemiBold, 18px, blanc)  
-   - Toggle à droite :  
-     - ON : fond orange/rouge, cercle blanc à droite  
-     - OFF : fond gris, cercle gris à gauche  
-   - **Réseaux disponibles** : Instagram, TikTok, YouTube, Twitter/X, Snapchat, Facebook
-
-   
-
-3. **Bottom Nav** identique — onglet Edit actif (icône crayon)
-
----
+### ÉCRAN 4 — Edit
+- Liste des réseaux avec toggle ON/OFF
+- Réseaux : Instagram, TikTok, YouTube, Twitter/X, Snapchat, Facebook
+- La sélection est sauvegardée dans Hive et synchronisée avec AppMonitorService
 
 ### ÉCRAN 5 — Profil
+- Infos utilisateur (nom, prénom, email)
+- Section "Autorisations" avec les 3 permission cards
 
-**Layout :**
+### ÉCRAN 6 — Intention ouverture réseau
+- Déclenché par AppMonitorService quand une app surveillée est ouverte
+- Titre : "Salut [Prénom] !"
+- Sous-titre : "Pourquoi tu ouvres [réseau] ?"
+- Boutons d'intention spécifiques au réseau (ex Instagram) :
+  - "Parler avec mes amis" → deeplink chat
+  - "Je cherche un truc précis" → deeplink explore
+  - "Poster" → deeplink camera
+  - "Je mérite une pause" → ouverture normale
+  - "L'habitude, sans raison" → ferme et redirige vers Spark
+- Bouton "Entrer quand même" grisé tant qu'aucune intention n'est cochée
 
-1. Champs de formulaire (cards `rgba(56,56,56,0.2)`, radius 20px) :  
-     
-   - Nom (label \+ valeur)  
-   - Prénom (label \+ valeur)  
-   - Email (label \+ valeur)  
-   - Mot de passe (label \+ `********`)  
-   - Lien "Mot de passe oublié ?" sous le champ
+### ÉCRAN 7 — Timer de session
+- Slider 1-20 min (max 10 min si 2ème session aujourd'hui)
+- Bouton "Lancer la session" grisé si slider = 0
 
-   
+### ÉCRAN 8 — Fin de session (À IMPLÉMENTER - design redesigné)
+**Déclenché quand** : timer expire → lockNow() → utilisateur rallume l'écran
 
-2. Texte bas : "Membre depuis le \[date\]" (centré, `#BBB`)  
-     
-3. **Bottom Nav** — onglet Profil actif
+**Comportement** :
+- L'écran est IMPOSSIBLE à ignorer (overlay WindowManager ou lockTask)
+- Si l'utilisateur swipe / ferme Spark → l'écran se réaffiche automatiquement
+- Si l'utilisateur ouvre Instagram → l'écran de fin de session se réaffiche (PAS l'écran d'intention)
+- Reste actif jusqu'au choix d'un bouton
 
----
+**Design** :
+- Fond sombre #171A1A
+- Titre : "Tu as terminé ta session ! Et c'est à toi de décider de la suite !"
+- Image flamme 3D centrée (assets/images/flame_3d.png)
+- **Bouton 1** — "Bloquer Insta 5min" (pill crème/orange, texte sombre)
+  - Sous-titre : "Le temps de déconnecter et de se remettre en mouvement"
+  - Action : bloque Instagram 5 min, ferme l'écran
+- **Bouton 2** — "Je suis encore là, continuer" (pill gris sombre, texte blanc)
+  - Disponible après **20 secondes** (countdown affiché)
+  - Sous-titre : "10min supplémentaire pour terminer ce que je devais faire."
+  - Action : lance une nouvelle session de 10 min, même logique de fin
 
-### ÉCRAN 6 — Intention ouverture réseau (intention\_screen)
+### ÉCRAN 9 — Redirection de sortie
+- Options : "Me reposer vraiment" / "Avancer sur quelque chose" / "Faire autre chose librement"
+- Bouton "Valider et bloquer [réseau] pour 30min"
 
-**Déclenché quand :** l'utilisateur ouvre une app surveillée par Spark
+### ÉCRAN 10 — Configuration Spark Focus
+- Objectif de travail (champ texte)
+- Apps à bloquer (liste des réseaux activés)
 
-**Layout :**
-
-1. Titre : "Salut \[Prénom\] \!" (Inter ExtraBold Italic, 32px, blanc)  
-     
-2. Sous-titre : "Pourquoi tu ouvres \[nom du réseau\] ?" (Inter Medium, 14px, `#BBB`)  
-     
-3. **Boutons d'intention** (liste verticale, chacun card `rgba(56,56,56,0.2)`, radius 20px) :  
-     
-   - "Parler avec mes amis"  
-   - "Je cherche un truc de précis"  
-   - "Poster"  
-   - "Je mérite une pause"  
-   - "L'habitude, sans raison"  
-   - Sélection \= bordure blanche, coche à droite
-
-   
-
-4. **Règles importantes :**  
-     
-   - Bouton "Fermer" : toujours actif (ferme Spark, n'ouvre pas le réseau)  
-   - Bouton "Entrer quand même" : **grisé tant qu'aucune intention n'est cochée**  
-   - Une fois une intention cochée → "Entrer quand même" s'active → navigate vers `session_timer_screen`
-
----
-
-### ÉCRAN 7 — Timer de session (session\_timer\_screen)
-
-**Layout :**
-
-1. Question : "Combien de temps tu te donnes ?" (Inter Medium, 14px, `#BBB`)  
-2. **Slider horizontal** :  
-   - Valeur initiale : 0 (grisé)  
-   - Min : 1 min, Max : 20 min (10 min si 2ème session ou plus sur le même réseau ce jour)  
-   - Valeur affichée à droite du slider : "X min"  
-   - Slider background : `rgba(56,56,56,0.2)`, track orange `#E05A3A`  
-3. **Bouton "Lancer la session"** :  
-   - **Grisé tant que slider \= 0**  
-   - Actif dès que slider \> 0 : fond blanc, texte noir  
-   - Action : lance le timer, ouvre le réseau social, navigate vers `session_timer_screen` actif
+### ÉCRAN 11 — Interception en mode Focus
+- "Tu es en mode Focus !"
+- Affiche l'objectif avec toggle
+- Bouton "Retourner travailler"
+- Si objectif coché : bouton "Déverrouiller [app]" en vert
 
 ---
 
-### ÉCRAN 8 — Fin de session (session\_end\_screen)
+## 9. LOGIQUE MÉTIER
 
-**Déclenché quand :** le timer expire
+### Détection fermeture Instagram pendant session
+- Si Instagram n'a pas été au premier plan depuis plus de **3 minutes** pendant une session active → la session se termine silencieusement (clear KEY_SESSION_END_TIME, KEY_ACTIVE, KEY_SESSION_NETWORK_ID)
+- Pas d'overlay, pas d'écran de fin → prochaine ouverture = écran d'intention normal
 
-**Layout :**
+### Blocage 5min après fin de session
+```kotlin
+// Après bouton 1 "Bloquer Insta 5min"
+prefs.putLong(KEY_BLOCK_UNTIL_MS, System.currentTimeMillis() + 5 * 60 * 1000)
+prefs.putString(KEY_BLOCK_PKG, "com.instagram.android")
+// Dans poll() : si blocked et pkg == blockPkg → intercepte avec cooldown 2s, pas d'écran d'intention
+```
 
-1. Flamme Spark centrée (grande, avec lueur)  
-2. Titre : "Tu as terminé ta session \!" (Inter Bold, 32px, blanc)  
-3. **Bouton principal** : "Je me suis perdu, aide moi à sortir \!"  
-   - Fond `rgba(56,56,56,0.2)`, texte blanc, radius 20px  
-   - Action → navigate vers `redirect_screen`  
-4. **Bouton secondaire** : "Je suis encore là, continuer."  
-   - **Grisé pendant 10 secondes** après l'apparition de l'écran  
-   - Texte sous le bouton : "«continuer» disponible dans Xs"  
-   - Après 10s : s'active → navigate vers `session_timer_screen` (max 10 min)
-
----
-
-### ÉCRAN 9 — Redirection de sortie (redirect\_screen)
-
-**Déclenché quand :** l'utilisateur clique "Je me suis perdu, aide moi à sortir \!"
-
-**Layout :**
-
-1. Titre : "Tu t'en es rendu compte, et c'est déjà énorme \!" (Inter Bold, blanc)  
-2. Question : "Qu'est-ce que tu veux faire maintenant ?" (Inter Medium, `#BBB`)  
-3. **Options de redirection** (cards sélectionnables) :  
-   - "Me reposer vraiment" / sous-titre : "Pas sur un écran, une vraie pause."  
-   - "Avancer sur quelque chose" / sous-titre : "revenir à ce qui compte"  
-   - "Faire autre chose librement" / sous-titre : "Sortir de ce piège addictif."  
-   - Sélection \= bordure blanche \+ coche  
-4. **Bouton** : "Valider et bloquer \[nom du réseau\] pour 30min"  
-   - **Grisé tant qu'aucune option n'est cochée**  
-   - Une fois active : fond blanc, texte noir  
-   - Action : bloque l'app 30 min, retour Dashboard
-
----
-
-### ÉCRAN 10 — Configuration Spark Focus (focus\_config\_screen)
-
-**Déclenché quand :** tap sur la flamme du Dashboard
-
-**Layout :**
-
-1. Bouton retour (flèche gauche, haut gauche)  
-2. Flamme Spark centrée (petite, avec lueur)  
-3. Question : "C'est quoi ton objectif pour cette session ?"  
-4. **Champ texte** : placeholder "Exemple : Terminer mon montage.."  
-   - Card `rgba(56,56,56,0.2)`, radius 20px  
-5. Section : "Apps bloquées :"  
-   - Liste des réseaux activés dans l'onglet Edit avec cases à cocher  
-   - Instagram / TikTok / YouTube (pré-cochés selon réseaux actifs)  
-6. **Note** : "Tu devras cocher ton objectif pour déverrouiller les apps." (Inter Medium, 12px, `#BBB`, centré)  
-7. **Bouton "Lancer la session"** : fond blanc, texte noir, radius 24px  
-   - Action : lance le mode Focus, retour Dashboard avec overlay Focus actif
-
----
-
-### ÉCRAN 11 — Interception en mode Focus (focus\_blocked\_screen)
-
-**Déclenché quand :** l'utilisateur tente d'ouvrir une app bloquée pendant le Focus
-
-**Layout :**
-
-1. Flamme Spark centrée (grande)  
-2. Titre : "Tu es en mode Focus \!" (Inter Bold, 32px, blanc)  
-3. **To-do item** (card `rgba(56,56,56,0.2)`, radius 20px) :  
-   - Affiche l'objectif défini au lancement  
-   - Toggle à droite (coché \= objectif accompli)  
-4. **Note** : "Tu devras cocher ton objectif pour déverrouiller les apps."  
-5. **Bouton "Retourner travailler"** : fond blanc, texte noir  
-   - Action : ferme l'écran, retour à l'app précédente (pas le réseau bloqué)  
-6. **Si objectif coché** : bouton "Déverrouiller \[nom app\]" s'active en vert
-
----
-
-## 6\. LOGIQUE MÉTIER IMPORTANTE
-
-### Compteur de sessions par réseau (même jour)
-
-// Si c'est la 2ème fois ou plus qu'on ouvre le même réseau aujourd'hui
-
-// → slider limité à 10 min au lieu de 20 min
-
-int sessionCountToday(String networkId) {
-
-  return sessions
-
-    .where((s) \=\> s.networkId \== networkId && s.isToday)
-
-    .length;
-
-}
-
+### Compteur de sessions (slider max)
+```dart
 int maxSessionDuration(String networkId) {
-
-  return sessionCountToday(networkId) \>= 1 ? 10 : 20;
-
+  return sessionCountToday(networkId) >= 1 ? 10 : 20;
 }
+```
 
-### Calcul "temps économisé"
-
-// Temps économisé \= somme des (limite \- durée réelle) pour sessions respectées
-
-// Temps "sans Spark" \= estimation basée sur durée moyenne avant Spark (définie à l'onboarding ou fixée à 3h)
-
-### Blocage 30 min après redirection
-
-// Après "Valider et bloquer \[réseau\] pour 30min"
-
-// → stocker timestamp de fin de blocage dans Hive
-
-// → vérifier à chaque ouverture si le blocage est encore actif
-
-DateTime blockedUntil \= DateTime.now().add(Duration(minutes: 30));
-
-### Mode Focus
-
-// État global du Focus dans le provider
-
-class FocusState {
-
-  bool isActive;
-
-  String objective;
-
-  bool objectiveChecked;
-
-  List\<String\> blockedApps;
-
-  DateTime startTime;
-
-}
-
-// Si isActive \= true ET l'app ouverte est dans blockedApps
-
-// → afficher focus\_blocked\_screen à la place
+### Blocage 30min après redirection
+```dart
+DateTime blockedUntil = DateTime.now().add(Duration(minutes: 30));
+```
 
 ---
 
-## 7\. ASSETS REQUIS
+## 10. ASSETS
 
+```
 assets/
-
 ├── images/
-
-│   └── spark\_logo.png          \# Logo Spark (flamme \+ texte)
-
-├── flame/
-
-│   ├── flame\_idle.gif          \# Flamme statique au repos
-
-│   └── flame\_spin.mp4          \# Rotation 360° au tap
-
+│   ├── spark_logo.png
+│   ├── flame_3d.png
+│   ├── spark_logo_vector.png
+│   └── spark_typography.png
 └── fonts/
-
-    └── Inter/                  \# Regular, Medium, SemiBold, Bold, ExtraBold
-
----
-
-## 8\. RÈGLES DE CODE
-
-1. **Jamais de couleurs hardcodées** dans les widgets — toujours utiliser `AppColors.X`  
-2. **Pas de setState** pour la logique métier — tout passe par Riverpod  
-3. **Nommage des fichiers** : snake\_case, suffixe `_screen.dart` ou `_widget.dart`  
-4. **Tous les textes** passent par des constantes dans `core/constants.dart`  
-5. **Le Bottom Nav** est un widget global réutilisé sur tous les écrans principaux  
-6. **BlendMode.screen** obligatoire sur tout widget vidéo flamme  
-7. **Tester sur émulateur Pixel 8 / Android 14** à chaque modification d'écran
+    └── Inter/ # Regular, Medium, SemiBold, Bold, ExtraBold (format Inter_18pt-*.ttf)
+```
 
 ---
 
-## 9\. COMMANDES UTILES
+## 11. RÈGLES DE CODE
 
-\# Lancer l'app sur l'émulateur Android
-
-flutter run
-
-\# Recharger à chaud
-
-r
-
-\# Recharger à froid (si erreurs de state)
-
-R
-
-\# Voir les erreurs
-
-flutter logs
-
-\# Build APK pour test
-
-flutter build apk \--debug
-
-\# Build release Android
-
-flutter build apk \--release
+1. Jamais de couleurs hardcodées — toujours `AppColors.X`
+2. Pas de setState pour la logique métier — tout passe par Riverpod
+3. Nommage : snake_case, suffixe `_screen.dart` ou `_widget.dart`
+4. Tous les textes passent par des constantes dans `core/constants.dart`
+5. Bottom Nav est un widget global réutilisé
+6. Device Admin requis pour lockNow() — toujours vérifier isAdminActive() avant d'appeler
+7. Ne jamais modifier KEY_SESSION_END_TIME depuis Flutter directement — passer par MonitorService.setSessionEndTime()
 
 ---
 
-## 10\. ORDRE DE DÉVELOPPEMENT RECOMMANDÉ
+## 12. COMMANDES UTILES
 
-1. Setup projet Flutter \+ packages \+ thème \+ router  
-2. Splash screen \+ Dashboard (structure)  
-3. Flamme centrale (gif statique \+ vidéo au tap \+ lueur)  
-4. Bottom nav  
-5. Flux intention → timer → fin de session → redirection  
-6. Onglet Edit (toggles réseaux)  
-7. Onglet Profil  
-8. Mode Spark Focus (config \+ interception)  
-9. Service de blocage Android  
-10. Tests sur émulateur \+ corrections  
-11. Build APK → envoyer à Léo pour build iOS
+```bash
+# Lancer sur le Honor (ID fixe)
+flutter run -d AYAV6R3704035491
 
+# Hot restart
+r (dans le terminal flutter run)
+
+# Build APK debug
+flutter build apk --debug
+
+# Sauvegarder sur GitHub
+git add .
+git commit -m "description"
+git push origin main
+
+# Désinstaller l'app du téléphone
+adb uninstall com.example.spark
+```
+
+---
+
+## 13. PROCHAINE ÉTAPE À IMPLÉMENTER
+
+**Étape 1** — Modifier session_end_screen.dart + AppMonitorService pour que l'écran de fin de session soit impossible à ignorer, avec le nouveau design (bouton "Bloquer 5min" + "Continuer 10min" disponible après 20s).
+
+**Étape 2** — Blocage 5min dans poll() : intercepter Instagram sans montrer l'écran d'intention.
+
+**Étape 3** — Détection fermeture Instagram : si absent du premier plan > 3min pendant session → terminer silencieusement.
+
+**Étape 4** — Synchronisation Flutter après choix bouton (reset timer, navigate dashboard).

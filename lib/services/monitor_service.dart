@@ -41,6 +41,21 @@ class MonitorService {
     } catch (_) {}
   }
 
+  /// Écrit le timestamp de fin de blocage d'un package dans SharedPreferences.
+  /// Appelé par le bouton "Bloquer Insta 5min" — le service natif bloque toute
+  /// tentative d'ouverture du package jusqu'à ce timestamp.
+  static Future<void> setBlockUntil({
+    required String packageName,
+    required int blockUntilMs,
+  }) async {
+    try {
+      await _channel.invokeMethod('setBlockUntil', {
+        'packageName': packageName,
+        'blockUntilMs': blockUntilMs,
+      });
+    } catch (_) {}
+  }
+
   /// Synchronise la config de surveillance (apps monitorées, session active, focus).
   /// Ne touche plus au timestamp de fin de session — géré par setSessionEndTime.
   static Future<void> updateConfig({

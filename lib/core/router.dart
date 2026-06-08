@@ -67,13 +67,16 @@ final appRouter = GoRouter(
         );
       },
     ),
-    // extra: {'networkId': String}
+    // extra: {'networkId': String, 'blockedUntilMs': int?}
     GoRoute(
       path: '/session-end',
       name: 'sessionEnd',
       builder: (context, state) {
         final extra = state.extra as Map<String, dynamic>? ?? {};
-        return SessionEndScreen(networkId: extra['networkId'] as String? ?? '');
+        return SessionEndScreen(
+          networkId: extra['networkId'] as String? ?? '',
+          blockedUntilMs: extra['blockedUntilMs'] as int? ?? 0,
+        );
       },
     ),
     // extra: {'networkId': String}

@@ -42,6 +42,11 @@ class AppMonitorService : Service() {
         const val EXTRA_IS_FOCUS         = "is_focus"
         const val EXTRA_SESSION_ENDED         = "session_ended_network_id"
         const val KEY_PENDING_SESSION_ENDED   = "pending_session_ended"
+        // Blocage temporaire après "Bloquer Insta 5min"
+        const val KEY_BLOCK_UNTIL_MS  = "block_until_ms"
+        const val KEY_BLOCK_PKG       = "block_pkg"
+        const val EXTRA_APP_BLOCKED   = "extra_app_blocked"
+        const val EXTRA_BLOCK_UNTIL_MS = "extra_block_until_ms"
         private const val CHANNEL_ID       = "spark_monitor"
         private const val NOTIF_ID         = 42
         private const val CHANNEL_ID_ALERT = "spark_session_alert"
@@ -49,6 +54,7 @@ class AppMonitorService : Service() {
         private const val TAG        = "SparkMonitor"
         private const val POLL_MS     = 1_000L
         private const val COOLDOWN_MS = 30_000L  // 30s — couvre le lag UsageStats + durée intention
+        private const val BLOCK_COOLDOWN_MS = 2_000L  // 2s — anti-spam pour l'écran de blocage
 
         val PKG_TO_ID = mapOf(
             "com.instagram.android"        to "instagram",
@@ -63,6 +69,7 @@ class AppMonitorService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
     private val lastIntercepted = mutableMapOf<String, Long>()
+    private val lastBlocked = mutableMapOf<String, Long>()
     private var isPolling = false
     private var overlayView: View? = null
     private val wm: WindowManager by lazy { getSystemService(Context.WINDOW_SERVICE) as WindowManager }
@@ -99,21 +106,46 @@ class AppMonitorService : Service() {
     private fun poll() {
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-        // ── Vérification fin de session (prioritaire sur toute interception) ──
+        // ── Fin de session (prioritaire) ──────────────────────────────────────
         val sessionEndTime = prefs.getLong(KEY_SESSION_END_TIME, 0L)
         if (sessionEndTime > 0L && System.currentTimeMillis() >= sessionEndTime) {
             val networkId = prefs.getString(KEY_SESSION_NETWORK_ID, "") ?: ""
-            // Effacer immédiatement pour ne pas re-déclencher au prochain poll
             prefs.edit().putLong(KEY_SESSION_END_TIME, 0L).apply()
-            if (networkId.isNotEmpty()) {
-                handleSessionEnd(networkId)
-            }
+            if (networkId.isNotEmpty()) handleSessionEnd(networkId)
             return
         }
 
-        val pkg = getForegroundPackage() ?: return
-        if (pkg == packageName) return  // Ignorer Spark lui-même
+        // ── Nettoyage blocage expiré (même sans app en avant-plan) ───────────
+        val blockUntil = prefs.getLong(KEY_BLOCK_UNTIL_MS, 0L)
+        val nowBlock = System.currentTimeMillis()
+        if (blockUntil > 0L && nowBlock >= blockUntil) {
+            prefs.edit()
+                .putLong(KEY_BLOCK_UNTIL_MS, 0L)
+                .putString(KEY_BLOCK_PKG, "")
+                .apply()
+        }
 
+        val pkg = getForegroundPackage() ?: return
+        if (pkg == packageName) return
+
+        // ── Blocage actif : intercepte Instagram sans écran d'intention ───────
+        if (blockUntil > 0L && nowBlock < blockUntil) {
+            val blockPkg = prefs.getString(KEY_BLOCK_PKG, "") ?: ""
+            if (pkg == blockPkg) {
+                if ((nowBlock - (lastBlocked[pkg] ?: 0L)) >= BLOCK_COOLDOWN_MS) {
+                    lastBlocked[pkg] = nowBlock
+                    val launchIntent = Intent(this, MainActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                        putExtra(EXTRA_APP_BLOCKED, PKG_TO_ID[pkg] ?: pkg)
+                        putExtra(EXTRA_BLOCK_UNTIL_MS, blockUntil)
+                    }
+                    startActivity(launchIntent)
+                }
+                return
+            }
+        }
+
+        // ── Interception normale ──────────────────────────────────────────────
         val monitored = prefs.getStringSet(KEY_MONITORED, emptySet()) ?: emptySet()
         if (!monitored.contains(pkg)) return
 
