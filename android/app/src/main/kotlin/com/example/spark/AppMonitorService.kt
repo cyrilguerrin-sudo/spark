@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.app.admin.DevicePolicyManager
+import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.ComponentName
 import android.content.Context
@@ -55,6 +56,7 @@ class AppMonitorService : Service() {
         private const val POLL_MS     = 1_000L
         private const val COOLDOWN_MS = 30_000L  // 30s — couvre le lag UsageStats + durée intention
         private const val BLOCK_COOLDOWN_MS = 2_000L  // 2s — anti-spam pour l'écran de blocage
+        private const val SILENT_CLOSE_DELAY_MS = 45_000L  // 45s sans Instagram → fermeture silencieuse
 
         val PKG_TO_ID = mapOf(
             "com.instagram.android"        to "instagram",
@@ -105,35 +107,51 @@ class AppMonitorService : Service() {
 
     private fun poll() {
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
 
-        // ── Fin de session (prioritaire) ──────────────────────────────────────
+        // ── Fin de session par timer (prioritaire) ────────────────────────────
         val sessionEndTime = prefs.getLong(KEY_SESSION_END_TIME, 0L)
-        if (sessionEndTime > 0L && System.currentTimeMillis() >= sessionEndTime) {
+        if (sessionEndTime > 0L && now >= sessionEndTime) {
             val networkId = prefs.getString(KEY_SESSION_NETWORK_ID, "") ?: ""
             prefs.edit().putLong(KEY_SESSION_END_TIME, 0L).apply()
             if (networkId.isNotEmpty()) handleSessionEnd(networkId)
             return
         }
 
-        // ── Nettoyage blocage expiré (même sans app en avant-plan) ───────────
+        // ── Nettoyage blocage expiré (avant getForegroundPackage) ────────────
         val blockUntil = prefs.getLong(KEY_BLOCK_UNTIL_MS, 0L)
-        val nowBlock = System.currentTimeMillis()
-        if (blockUntil > 0L && nowBlock >= blockUntil) {
+        if (blockUntil > 0L && now >= blockUntil) {
             prefs.edit()
                 .putLong(KEY_BLOCK_UNTIL_MS, 0L)
                 .putString(KEY_BLOCK_PKG, "")
                 .apply()
         }
 
-        val pkg = getForegroundPackage() ?: return
+        val pkg = getForegroundPackage()
+
+        // ── Détection fermeture pendant session active ────────────────────────
+        if (sessionEndTime > 0L) {
+            val sessionNetworkId = prefs.getString(KEY_SESSION_NETWORK_ID, "") ?: ""
+            val sessionPkg = PKG_TO_ID.entries
+                .firstOrNull { it.value == sessionNetworkId }?.key
+            if (sessionPkg != null) {
+                val lastResumedMs = getLastResumedMs(sessionPkg, now)
+                if (lastResumedMs > 0L && (now - lastResumedMs) >= SILENT_CLOSE_DELAY_MS) {
+                    silentCloseSession(sessionNetworkId, sessionPkg)
+                    return
+                }
+            }
+        }
+
+        pkg ?: return
         if (pkg == packageName) return
 
-        // ── Blocage actif : intercepte Instagram sans écran d'intention ───────
-        if (blockUntil > 0L && nowBlock < blockUntil) {
+        // ── Blocage actif : intercepte sans écran d'intention ─────────────────
+        if (blockUntil > 0L && now < blockUntil) {
             val blockPkg = prefs.getString(KEY_BLOCK_PKG, "") ?: ""
             if (pkg == blockPkg) {
-                if ((nowBlock - (lastBlocked[pkg] ?: 0L)) >= BLOCK_COOLDOWN_MS) {
-                    lastBlocked[pkg] = nowBlock
+                if ((now - (lastBlocked[pkg] ?: 0L)) >= BLOCK_COOLDOWN_MS) {
+                    lastBlocked[pkg] = now
                     val launchIntent = Intent(this, MainActivity::class.java).apply {
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
                         putExtra(EXTRA_APP_BLOCKED, PKG_TO_ID[pkg] ?: pkg)
@@ -152,7 +170,6 @@ class AppMonitorService : Service() {
         val active = prefs.getStringSet(KEY_ACTIVE, emptySet()) ?: emptySet()
         if (active.contains(pkg)) return
 
-        val now = System.currentTimeMillis()
         if ((now - (lastIntercepted[pkg] ?: 0L)) < COOLDOWN_MS) return
 
         val focusActive = prefs.getBoolean(KEY_FOCUS_ACTIVE, false)
@@ -168,6 +185,32 @@ class AppMonitorService : Service() {
             putExtra(EXTRA_IS_FOCUS, focusActive && focusPkgs.contains(pkg))
         }
         startActivity(launchIntent)
+    }
+
+    private fun silentCloseSession(networkId: String, sessionPkg: String) {
+        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs.edit()
+            .putLong(KEY_SESSION_END_TIME, 0L)
+            .putString(KEY_SESSION_NETWORK_ID, "")
+            .apply()
+        clearActiveSession(networkId)
+        Log.d(TAG, "Session $networkId terminée silencieusement (absent depuis ${SILENT_CLOSE_DELAY_MS / 1000}s)")
+    }
+
+    private fun getLastResumedMs(pkg: String, now: Long): Long {
+        val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        val events = usm.queryEvents(now - 60_000L, now) ?: return 0L
+        val event = UsageEvents.Event()
+        var lastResumed = 0L
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            if (event.packageName == pkg &&
+                event.eventType == UsageEvents.Event.ACTIVITY_RESUMED &&
+                event.timeStamp > lastResumed) {
+                lastResumed = event.timeStamp
+            }
+        }
+        return lastResumed
     }
 
     private fun getForegroundPackage(): String? {
