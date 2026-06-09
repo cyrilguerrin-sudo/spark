@@ -55,9 +55,9 @@ class AppStrings {
   static const String sessionEndBlockButton = 'Bloquer Insta 5min';
   static const String sessionEndBlockSubtitle =
       'Le temps de déconnecter et de se remettre en mouvement';
-  static const String sessionEndContinue = 'Je suis encore là, continuer';
+  static const String sessionEndContinue = 'Continuer quand même';
   static const String sessionEndContinueSubtitle =
-      '10min supplémentaire pour terminer ce que je devais faire.';
+      'Retour au dashboard sans bloquer Insta';
   static const String sessionEndContinueCountdownPrefix = 'disponible dans ';
   static const String sessionEndContinueCountdownSuffix = 's';
 

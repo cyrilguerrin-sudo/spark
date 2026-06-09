@@ -75,10 +75,7 @@ class _SessionEndScreenState extends ConsumerState<SessionEndScreen> {
   }
 
   void _onContinue() {
-    ref.read(sessionTimerProvider.notifier).start(
-      widget.networkId,
-      AppDurations.continueSessionDurationMinutes,
-    );
+    ref.read(sessionTimerProvider.notifier).reset();
     context.go('/dashboard');
   }
 
