@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.app.admin.DevicePolicyManager
+import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.ComponentName
 import android.content.Context
@@ -52,9 +53,13 @@ class AppMonitorService : Service() {
         private const val CHANNEL_ID_ALERT = "spark_session_alert"
         private const val NOTIF_ID_ALERT   = 43
         private const val TAG        = "SparkMonitor"
-        private const val POLL_MS     = 1_000L
+        private const val POLL_MS     = 500L
         private const val COOLDOWN_MS = 30_000L  // 30s — couvre le lag UsageStats + durée intention
-        private const val BLOCK_COOLDOWN_MS = 2_000L  // 2s — anti-spam pour l'écran de blocage
+        private const val BLOCK_COOLDOWN_MS           = 2_000L   // 2s — anti-spam pour l'écran de blocage
+        private const val SILENT_CLOSE_TIMEOUT_MS      = 45_000L  // 45s sans foreground → reset silencieux
+        private const val SESSION_FOREGROUND_WINDOW_MS = 10_000L   // 10s — détection rapide foreground/background
+        const val KEY_SESSION_REMAINING_MS = "session_remaining_ms" // ms restants quand timer en pause
+        const val KEY_SESSION_PAUSED_AT_MS = "session_paused_at_ms" // timestamp de la mise en pause
 
         val PKG_TO_ID = mapOf(
             "com.instagram.android"        to "instagram",
@@ -105,20 +110,59 @@ class AppMonitorService : Service() {
 
     private fun poll() {
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
 
-        // ── Fin de session (prioritaire) ──────────────────────────────────────
-        val sessionEndTime = prefs.getLong(KEY_SESSION_END_TIME, 0L)
-        if (sessionEndTime > 0L && System.currentTimeMillis() >= sessionEndTime) {
-            val networkId = prefs.getString(KEY_SESSION_NETWORK_ID, "") ?: ""
-            prefs.edit().putLong(KEY_SESSION_END_TIME, 0L).apply()
-            if (networkId.isNotEmpty()) handleSessionEnd(networkId)
-            return
+        // ── Timer de session : pause / reprise / expiration / reset silencieux ─
+        val sessionNetworkId = prefs.getString(KEY_SESSION_NETWORK_ID, "") ?: ""
+        if (sessionNetworkId.isNotEmpty()) {
+            val sessionEndTime = prefs.getLong(KEY_SESSION_END_TIME, 0L)
+            val remainingMs    = prefs.getLong(KEY_SESSION_REMAINING_MS, 0L)
+            val pausedAtMs     = prefs.getLong(KEY_SESSION_PAUSED_AT_MS, 0L)
+
+            val sessionPkgs = PKG_TO_ID.entries
+                .filter { it.value == sessionNetworkId }
+                .map { it.key }.toSet()
+            val appInFg = sessionPkgs.any { isSessionPkgForeground(it) }
+
+            if (appInFg) {
+                when {
+                    remainingMs > 0L -> {
+                        // Reprendre le timer depuis le temps restant
+                        prefs.edit()
+                            .putLong(KEY_SESSION_END_TIME, now + remainingMs)
+                            .putLong(KEY_SESSION_REMAINING_MS, 0L)
+                            .putLong(KEY_SESSION_PAUSED_AT_MS, 0L)
+                            .apply()
+                    }
+                    sessionEndTime > 0L && now >= sessionEndTime -> {
+                        // Expiration normale — app au premier plan
+                        prefs.edit().putLong(KEY_SESSION_END_TIME, 0L).apply()
+                        handleSessionEnd(sessionNetworkId)
+                        return
+                    }
+                }
+            } else {
+                when {
+                    sessionEndTime > 0L -> {
+                        // Passer en pause : sauvegarder le temps restant
+                        prefs.edit()
+                            .putLong(KEY_SESSION_END_TIME, 0L)
+                            .putLong(KEY_SESSION_REMAINING_MS, (sessionEndTime - now).coerceAtLeast(0L))
+                            .putLong(KEY_SESSION_PAUSED_AT_MS, now)
+                            .apply()
+                    }
+                    pausedAtMs > 0L && (now - pausedAtMs) >= SILENT_CLOSE_TIMEOUT_MS -> {
+                        // 45s sans retour → reset silencieux
+                        silentReset(sessionNetworkId)
+                        return
+                    }
+                }
+            }
         }
 
         // ── Nettoyage blocage expiré (même sans app en avant-plan) ───────────
         val blockUntil = prefs.getLong(KEY_BLOCK_UNTIL_MS, 0L)
-        val nowBlock = System.currentTimeMillis()
-        if (blockUntil > 0L && nowBlock >= blockUntil) {
+        if (blockUntil > 0L && now >= blockUntil) {
             prefs.edit()
                 .putLong(KEY_BLOCK_UNTIL_MS, 0L)
                 .putString(KEY_BLOCK_PKG, "")
@@ -128,12 +172,12 @@ class AppMonitorService : Service() {
         val pkg = getForegroundPackage() ?: return
         if (pkg == packageName) return
 
-        // ── Blocage actif : intercepte Instagram sans écran d'intention ───────
-        if (blockUntil > 0L && nowBlock < blockUntil) {
+        // ── Blocage actif : intercepte sans écran d'intention ─────────────────
+        if (blockUntil > 0L && now < blockUntil) {
             val blockPkg = prefs.getString(KEY_BLOCK_PKG, "") ?: ""
             if (pkg == blockPkg) {
-                if ((nowBlock - (lastBlocked[pkg] ?: 0L)) >= BLOCK_COOLDOWN_MS) {
-                    lastBlocked[pkg] = nowBlock
+                if ((now - (lastBlocked[pkg] ?: 0L)) >= BLOCK_COOLDOWN_MS) {
+                    lastBlocked[pkg] = now
                     val launchIntent = Intent(this, MainActivity::class.java).apply {
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
                         putExtra(EXTRA_APP_BLOCKED, PKG_TO_ID[pkg] ?: pkg)
@@ -152,7 +196,6 @@ class AppMonitorService : Service() {
         val active = prefs.getStringSet(KEY_ACTIVE, emptySet()) ?: emptySet()
         if (active.contains(pkg)) return
 
-        val now = System.currentTimeMillis()
         if ((now - (lastIntercepted[pkg] ?: 0L)) < COOLDOWN_MS) return
 
         val focusActive = prefs.getBoolean(KEY_FOCUS_ACTIVE, false)
@@ -175,6 +218,24 @@ class AppMonitorService : Service() {
         val now = System.currentTimeMillis()
         val stats = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, now - 10_000, now)
         return stats?.maxByOrNull { it.lastTimeUsed }?.packageName
+    }
+
+    // Retourne true si le dernier événement d'activité pour ce package est ACTIVITY_RESUMED.
+    private fun isSessionPkgForeground(pkg: String): Boolean {
+        val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        val now = System.currentTimeMillis()
+        val events = usm.queryEvents(now - SESSION_FOREGROUND_WINDOW_MS, now)
+        val event = UsageEvents.Event()
+        var latestType = -1
+        var latestTime = 0L
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            if (event.packageName == pkg && event.timeStamp > latestTime) {
+                latestType = event.eventType
+                latestTime = event.timeStamp
+            }
+        }
+        return latestType == UsageEvents.Event.ACTIVITY_RESUMED
     }
 
     // ── Overlay système — fin de session (prioritaire sur tous constructeurs) ─
@@ -209,11 +270,22 @@ class AppMonitorService : Service() {
 
     private fun clearActiveSession(networkId: String) {
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val pkgToRemove = PKG_TO_ID.entries.firstOrNull { it.value == networkId }?.key ?: return
+        val pkgsToRemove = PKG_TO_ID.entries.filter { it.value == networkId }.map { it.key }.toSet()
         val active = (prefs.getStringSet(KEY_ACTIVE, emptySet()) ?: emptySet()).toMutableSet()
-        if (active.remove(pkgToRemove)) {
+        if (active.removeAll(pkgsToRemove)) {
             prefs.edit().putStringSet(KEY_ACTIVE, active).apply()
         }
+    }
+
+    private fun silentReset(networkId: String) {
+        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs.edit()
+            .putLong(KEY_SESSION_END_TIME, 0L)
+            .putLong(KEY_SESSION_REMAINING_MS, 0L)
+            .putLong(KEY_SESSION_PAUSED_AT_MS, 0L)
+            .putString(KEY_SESSION_NETWORK_ID, "")
+            .apply()
+        clearActiveSession(networkId)
     }
 
     @Suppress("DEPRECATION")
