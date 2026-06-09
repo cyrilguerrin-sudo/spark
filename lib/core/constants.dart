@@ -56,8 +56,7 @@ class AppStrings {
   static const String sessionEndBlockSubtitle =
       'Le temps de déconnecter et de se remettre en mouvement';
   static const String sessionEndContinue = 'Continuer quand même';
-  static const String sessionEndContinueSubtitle =
-      'Retour au dashboard sans bloquer Insta';
+  static const String sessionEndContinueSubtitle = 'Retour au dashboard';
   static const String sessionEndContinueCountdownPrefix = 'disponible dans ';
   static const String sessionEndContinueCountdownSuffix = 's';
 
@@ -152,13 +151,13 @@ class AppNetworks {
     switch (networkId) {
       case instagram:
         return const [
-          // HTTPS app links : Instagram les handle nativement (plus fiable que instagram://)
+          // scheme natif instagram:// via intent URI (plus fiable que le HTTPS App Link pour l'inbox)
           IntentionOption(
             label: 'Parler avec mes amis',
-            deepLink: 'https://www.instagram.com/direct/inbox/',
+            deepLink: 'intent://direct-inbox#Intent;package=com.instagram.android;scheme=instagram;end',
           ),
           IntentionOption(
-            label: 'Je cherche un truc précis',
+            label: 'Je cherche un truc de précis',
             deepLink: 'https://www.instagram.com/explore/',
           ),
           // intent:// URI confirmé pour la story/caméra Instagram sur Android récent
@@ -175,10 +174,40 @@ class AppNetworks {
             deepLink: null, // ferme sans ouvrir
           ),
         ];
+      case tiktok:
+        return const [
+          IntentionOption(
+            label: 'Je cherche un truc de précis',
+            deepLink: 'https://www.tiktok.com/search',
+          ),
+          IntentionOption(
+            label: 'Je mérite une pause',
+            deepLink: '',
+          ),
+          IntentionOption(
+            label: 'L\'habitude, sans raison',
+            deepLink: null,
+          ),
+        ];
+      case youtube:
+        return const [
+          IntentionOption(
+            label: 'Je cherche un truc de précis',
+            deepLink: 'https://www.youtube.com/results?search_query=',
+          ),
+          IntentionOption(
+            label: 'Je mérite une pause',
+            deepLink: '',
+          ),
+          IntentionOption(
+            label: 'L\'habitude, sans raison',
+            deepLink: null,
+          ),
+        ];
       default:
         return const [
           IntentionOption(label: 'Parler avec mes amis'),
-          IntentionOption(label: 'Je cherche un truc précis'),
+          IntentionOption(label: 'Je cherche un truc de précis'),
           IntentionOption(label: 'Poster'),
           IntentionOption(label: 'Je mérite une pause'),
           IntentionOption(label: 'L\'habitude, sans raison', deepLink: null),

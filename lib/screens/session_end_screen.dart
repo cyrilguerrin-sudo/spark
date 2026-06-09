@@ -143,7 +143,7 @@ class _SessionEndScreenState extends ConsumerState<SessionEndScreen> {
                           ),
                           elevation: 0,
                         ),
-                        child: const Text(AppStrings.sessionEndBlockButton),
+                        child: Text('Bloquer ${AppNetworks.names[widget.networkId] ?? widget.networkId} 5min'),
                       ),
                     ),
                     const SizedBox(height: 10),
@@ -224,7 +224,7 @@ class _SessionEndScreenState extends ConsumerState<SessionEndScreen> {
               Padding(
                 padding: const EdgeInsets.only(top: 48),
                 child: Text(
-                  AppStrings.sessionEndBlockedTitle,
+                  '${AppNetworks.names[widget.networkId] ?? widget.networkId} est bloqué',
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     fontFamily: 'Inter',

@@ -32,21 +32,6 @@ class NetworksNotifier extends StateNotifier<List<SocialNetwork>> {
       name: AppNetworks.names[AppNetworks.youtube]!,
       iconPath: 'assets/images/youtube.png',
     ),
-    SocialNetwork(
-      id: AppNetworks.twitter,
-      name: AppNetworks.names[AppNetworks.twitter]!,
-      iconPath: 'assets/images/twitter.png',
-    ),
-    SocialNetwork(
-      id: AppNetworks.snapchat,
-      name: AppNetworks.names[AppNetworks.snapchat]!,
-      iconPath: 'assets/images/snapchat.png',
-    ),
-    SocialNetwork(
-      id: AppNetworks.facebook,
-      name: AppNetworks.names[AppNetworks.facebook]!,
-      iconPath: 'assets/images/facebook.png',
-    ),
   ];
 
   void toggleNetwork(String networkId) {
