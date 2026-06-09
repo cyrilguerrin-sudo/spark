@@ -18,7 +18,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     setState(() => _loading = true);
     await StorageService.markInitialized();
     if (!mounted) return;
-    context.go('/dashboard');
+    context.go('/permissions');
   }
 
   @override

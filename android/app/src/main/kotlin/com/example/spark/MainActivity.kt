@@ -8,6 +8,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.text.TextUtils
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -83,7 +84,11 @@ class MainActivity : FlutterActivity() {
                     })
                     result.success(null)
                 }
-
+                "checkAccessibilityPermission" -> result.success(isAccessibilityServiceEnabled())
+                "openAccessibilitySettings" -> {
+                    startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                    result.success(null)
+                }
                 // ── Service de surveillance ──────────────────────────────
                 "startMonitorService" -> {
                     startMonitorService()
@@ -335,6 +340,20 @@ class MainActivity : FlutterActivity() {
     private fun isDeviceAdminActive(): Boolean {
         val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         return dpm.isAdminActive(ComponentName(this, SparkDeviceAdminReceiver::class.java))
+    }
+
+    private fun isAccessibilityServiceEnabled(): Boolean {
+        val flat = Settings.Secure.getString(
+            contentResolver,
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        ) ?: return false
+        val target = ComponentName(this, SparkAccessibilityService::class.java).flattenToString()
+        val splitter = TextUtils.SimpleStringSplitter(':')
+        splitter.setString(flat)
+        while (splitter.hasNext()) {
+            if (splitter.next().equals(target, ignoreCase = true)) return true
+        }
+        return false
     }
 
 }

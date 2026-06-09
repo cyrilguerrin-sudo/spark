@@ -17,6 +17,7 @@ class _PermissionsScreenState extends State<PermissionsScreen>
   bool _hasUsageStats = false;
   bool _hasOverlay = false;
   bool _hasDeviceAdmin = false;
+  bool _hasAccessibility = false;
 
   @override
   void initState() {
@@ -43,6 +44,7 @@ class _PermissionsScreenState extends State<PermissionsScreen>
       _hasUsageStats = result.usageStats;
       _hasOverlay = result.overlay;
       _hasDeviceAdmin = result.deviceAdmin;
+      _hasAccessibility = result.accessibility;
     });
   }
 
@@ -56,7 +58,7 @@ class _PermissionsScreenState extends State<PermissionsScreen>
 
   @override
   Widget build(BuildContext context) {
-    final allGranted = _hasUsageStats && _hasOverlay && _hasDeviceAdmin;
+    final allGranted = _hasUsageStats && _hasOverlay && _hasDeviceAdmin && _hasAccessibility;
 
     return Scaffold(
       backgroundColor: AppColors.bgPrimary,
@@ -130,6 +132,16 @@ class _PermissionsScreenState extends State<PermissionsScreen>
                           'Spark verrouille l\'écran quand ta session se termine. Fonctionne sur tous les appareils.',
                       isGranted: _hasDeviceAdmin,
                       onActivate: PermissionService.openDeviceAdminSettings,
+                    ),
+                    const SizedBox(height: 12),
+
+                    PermissionCard(
+                      icon: Icons.accessibility_new_rounded,
+                      title: 'Service d\'accessibilité',
+                      description:
+                          'Détection instantanée de l\'ouverture des apps, comme OneSec. Aucune donnée transmise hors de l\'appareil.',
+                      isGranted: _hasAccessibility,
+                      onActivate: PermissionService.openAccessibilitySettings,
                     ),
 
                     const SizedBox(height: 40),

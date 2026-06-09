@@ -47,10 +47,10 @@ class _SplashScreenState extends State<SplashScreen> {
     // Vérifier à nouveau après le gap async
     if (!_isStillActive()) return;
 
-    if (!perms.usageStats || !perms.overlay) {
-      context.go('/permissions');
-    } else if (StorageService.isFirstLaunch) {
+    if (StorageService.isFirstLaunch) {
       context.go('/onboarding');
+    } else if (!perms.usageStats || !perms.overlay) {
+      context.go('/permissions');
     } else {
       context.go('/dashboard');
     }

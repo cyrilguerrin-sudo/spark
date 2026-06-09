@@ -39,10 +39,23 @@ class PermissionService {
     await _channel.invokeMethod('openDeviceAdminSettings');
   }
 
-  static Future<({bool usageStats, bool overlay, bool deviceAdmin})> checkAll() async {
+  static Future<bool> hasAccessibilityPermission() async {
+    try {
+      return await _channel.invokeMethod<bool>('checkAccessibilityPermission') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<void> openAccessibilitySettings() async {
+    await _channel.invokeMethod('openAccessibilitySettings');
+  }
+
+  static Future<({bool usageStats, bool overlay, bool deviceAdmin, bool accessibility})> checkAll() async {
     final usage = await hasUsageStats();
     final overlay = await hasOverlayPermission();
     final admin = await hasDeviceAdmin();
-    return (usageStats: usage, overlay: overlay, deviceAdmin: admin);
+    final accessibility = await hasAccessibilityPermission();
+    return (usageStats: usage, overlay: overlay, deviceAdmin: admin, accessibility: accessibility);
   }
 }

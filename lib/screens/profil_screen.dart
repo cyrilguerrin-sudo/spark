@@ -23,6 +23,7 @@ class _ProfilScreenState extends State<ProfilScreen>
   bool _hasUsageStats = false;
   bool _hasOverlay = false;
   bool _hasDeviceAdmin = false;
+  bool _hasAccessibility = false;
 
   static const _frMonths = [
     '',
@@ -61,6 +62,7 @@ class _ProfilScreenState extends State<ProfilScreen>
       _hasUsageStats = result.usageStats;
       _hasOverlay = result.overlay;
       _hasDeviceAdmin = result.deviceAdmin;
+      _hasAccessibility = result.accessibility;
     });
   }
 
@@ -177,6 +179,16 @@ class _ProfilScreenState extends State<ProfilScreen>
                         'Spark verrouille l\'écran quand ta session se termine.',
                     isGranted: _hasDeviceAdmin,
                     onActivate: PermissionService.openDeviceAdminSettings,
+                  ),
+                  const SizedBox(height: 10),
+
+                  PermissionCard(
+                    icon: Icons.accessibility_new_rounded,
+                    title: 'Service d\'accessibilité',
+                    description:
+                        'Détection instantanée de l\'ouverture des apps, comme OneSec. Aucune donnée transmise hors de l\'appareil.',
+                    isGranted: _hasAccessibility,
+                    onActivate: PermissionService.openAccessibilitySettings,
                   ),
 
                   const SizedBox(height: 36),
