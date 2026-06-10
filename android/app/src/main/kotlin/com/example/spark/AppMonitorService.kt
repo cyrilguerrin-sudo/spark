@@ -56,7 +56,7 @@ class AppMonitorService : Service() {
         private const val POLL_MS     = 500L
         private const val BLOCK_COOLDOWN_MS           = 2_000L   // 2s — anti-spam pour l'écran de blocage
         private const val SILENT_CLOSE_TIMEOUT_MS      = 45_000L  // 45s sans foreground → reset silencieux
-        private const val SESSION_FOREGROUND_WINDOW_MS = 10_000L   // 10s — détection rapide foreground/background
+        private const val SESSION_FOREGROUND_WINDOW_MS = 30 * 60 * 1_000L  // 30min — couvre la durée max de session
         const val KEY_SESSION_REMAINING_MS = "session_remaining_ms" // ms restants quand timer en pause
         const val KEY_SESSION_PAUSED_AT_MS = "session_paused_at_ms" // timestamp de la mise en pause
 
@@ -120,8 +120,7 @@ class AppMonitorService : Service() {
             val sessionPkgs = PKG_TO_ID.entries
                 .filter { it.value == sessionNetworkId }
                 .map { it.key }.toSet()
-            val currentFg = getForegroundPackage()
-            val appInFg = currentFg != null && sessionPkgs.contains(currentFg)
+            val appInFg = sessionPkgs.any { isSessionPkgForeground(it) }
 
             if (appInFg) {
                 when {
