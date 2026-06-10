@@ -120,7 +120,8 @@ class AppMonitorService : Service() {
             val sessionPkgs = PKG_TO_ID.entries
                 .filter { it.value == sessionNetworkId }
                 .map { it.key }.toSet()
-            val appInFg = sessionPkgs.any { isSessionPkgForeground(it) }
+            val currentFg = getForegroundPackage()
+            val appInFg = currentFg != null && sessionPkgs.contains(currentFg)
 
             if (appInFg) {
                 when {
@@ -247,12 +248,15 @@ class AppMonitorService : Service() {
                 .putString(KEY_PENDING_SESSION_ENDED, networkId)
                 .apply()
             clearActiveSession(networkId)
+            var locked = false
             try {
                 dpm.lockNow()
+                locked = true
             } catch (e: Exception) {
                 Log.e(TAG, "lockNow() EXCEPTION — ${e::class.simpleName}: ${e.message}")
             }
-            return
+            if (locked) return
+            // lockNow() a échoué — fallthrough vers overlay
         }
 
         // Priorité 2 — WindowManager overlay (SYSTEM_ALERT_WINDOW)
@@ -269,9 +273,14 @@ class AppMonitorService : Service() {
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val pkgsToRemove = PKG_TO_ID.entries.filter { it.value == networkId }.map { it.key }.toSet()
         val active = (prefs.getStringSet(KEY_ACTIVE, emptySet()) ?: emptySet()).toMutableSet()
-        if (active.removeAll(pkgsToRemove)) {
-            prefs.edit().putStringSet(KEY_ACTIVE, active).apply()
-        }
+        active.removeAll(pkgsToRemove)
+        prefs.edit()
+            .putStringSet(KEY_ACTIVE, active)
+            .putString(KEY_SESSION_NETWORK_ID, "")
+            .putLong(KEY_SESSION_END_TIME, 0L)
+            .putLong(KEY_SESSION_REMAINING_MS, 0L)
+            .putLong(KEY_SESSION_PAUSED_AT_MS, 0L)
+            .apply()
     }
 
     private fun silentReset(networkId: String) {
