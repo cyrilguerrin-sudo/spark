@@ -42,6 +42,13 @@ class _SparkAppState extends ConsumerState<SparkApp> {
         : <String, dynamic>{};
     final networkId = args['networkId'] as String? ?? '';
 
+    if (call.method == 'onSessionCancelled') {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ref.read(sessionTimerProvider.notifier).reset();
+      });
+      return;
+    }
+
     if (call.method == 'onSessionEnded') {
       if (networkId.isEmpty) return;
       WidgetsBinding.instance.addPostFrameCallback((_) {

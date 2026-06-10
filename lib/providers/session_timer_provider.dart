@@ -60,10 +60,15 @@ class SessionTimerNotifier extends StateNotifier<SessionTimerState> {
     // Timer Dart uniquement pour l'affichage du compte à rebours.
     // Le verrouillage réel est déclenché par AppMonitorService qui poll
     // KEY_SESSION_END_TIME toutes les secondes, indépendamment de Flutter.
-    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
+    _timer = Timer.periodic(const Duration(seconds: 1), (t) async {
       final next = state.remaining - const Duration(seconds: 1);
       if (next.inSeconds <= 0) {
         t.cancel();
+        final pending = await MonitorService.hasPendingSessionEnd();
+        if (!pending) {
+          reset();
+          return;
+        }
         state = state.copyWith(
           status: TimerStatus.expired,
           remaining: Duration.zero,

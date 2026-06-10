@@ -46,6 +46,11 @@ class MainActivity : FlutterActivity() {
                 pendingSessionEndedNetworkId = pendingEnd
             }
         }
+        val cancelledNetworkId = prefs.getString(AppMonitorService.KEY_SESSION_CANCELLED, "") ?: ""
+        if (cancelledNetworkId.isNotEmpty()) {
+            prefs.edit().putString(AppMonitorService.KEY_SESSION_CANCELLED, "").apply()
+            channel?.invokeMethod("onSessionCancelled", mapOf("networkId" to cancelledNetworkId))
+        }
     }
 
     // ── Flutter engine setup ─────────────────────────────────────────────────
@@ -127,6 +132,11 @@ class MainActivity : FlutterActivity() {
                         .putString(AppMonitorService.KEY_SESSION_NETWORK_ID, "")
                         .apply()
                     result.success(null)
+                }
+                "hasPendingSessionEnd" -> {
+                    val prefs = getSharedPreferences(AppMonitorService.PREFS, Context.MODE_PRIVATE)
+                    val pending = prefs.getString(AppMonitorService.KEY_PENDING_SESSION_ENDED, "") ?: ""
+                    result.success(pending.isNotEmpty())
                 }
                 "setBlockUntil" -> {
                     val args = call.arguments as Map<*, *>

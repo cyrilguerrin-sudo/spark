@@ -43,6 +43,7 @@ class AppMonitorService : Service() {
         const val EXTRA_IS_FOCUS         = "is_focus"
         const val EXTRA_SESSION_ENDED         = "session_ended_network_id"
         const val KEY_PENDING_SESSION_ENDED   = "pending_session_ended"
+        const val KEY_SESSION_CANCELLED       = "session_cancelled"
         // Blocage temporaire après "Bloquer Insta 5min"
         const val KEY_BLOCK_UNTIL_MS  = "block_until_ms"
         const val KEY_BLOCK_PKG       = "block_pkg"
@@ -169,6 +170,7 @@ class AppMonitorService : Service() {
 
         val pkg = getForegroundPackage() ?: return
         if (pkg == packageName) return
+        if (!isSessionPkgForeground(pkg, 10_000L)) return
 
         // ── Blocage actif : intercepte sans écran d'intention ─────────────────
         if (blockUntil > 0L && now < blockUntil) {
@@ -218,10 +220,10 @@ class AppMonitorService : Service() {
     }
 
     // Retourne true si le dernier événement d'activité pour ce package est ACTIVITY_RESUMED.
-    private fun isSessionPkgForeground(pkg: String): Boolean {
+    private fun isSessionPkgForeground(pkg: String, windowMs: Long = SESSION_FOREGROUND_WINDOW_MS): Boolean {
         val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         val now = System.currentTimeMillis()
-        val events = usm.queryEvents(now - SESSION_FOREGROUND_WINDOW_MS, now)
+        val events = usm.queryEvents(now - windowMs, now)
         val event = UsageEvents.Event()
         var latestType = -1
         var latestTime = 0L
@@ -289,6 +291,8 @@ class AppMonitorService : Service() {
             .putLong(KEY_SESSION_REMAINING_MS, 0L)
             .putLong(KEY_SESSION_PAUSED_AT_MS, 0L)
             .putString(KEY_SESSION_NETWORK_ID, "")
+            .putString(KEY_PENDING_SESSION_ENDED, "")
+            .putString(KEY_SESSION_CANCELLED, networkId)
             .apply()
         clearActiveSession(networkId)
     }

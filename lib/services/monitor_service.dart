@@ -41,6 +41,17 @@ class MonitorService {
     } catch (_) {}
   }
 
+  /// Retourne true si KEY_PENDING_SESSION_ENDED est non vide côté natif,
+  /// c'est-à-dire si handleSessionEnd() a bien été déclenché (pas un silent reset).
+  static Future<bool> hasPendingSessionEnd() async {
+    try {
+      final result = await _channel.invokeMethod<bool>('hasPendingSessionEnd');
+      return result ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Écrit le timestamp de fin de blocage d'un package dans SharedPreferences.
   /// Appelé par le bouton "Bloquer Insta 5min" — le service natif bloque toute
   /// tentative d'ouverture du package jusqu'à ce timestamp.
