@@ -17,11 +17,14 @@ class SparkAccessibilityService : AccessibilityService() {
 
     private val lastIntercepted = mutableMapOf<String, Long>()
     private val lastBlocked = mutableMapOf<String, Long>()
+    private val lastContentChangedMs = mutableMapOf<String, Long>()
 
     override fun onServiceConnected() {
+        Log.e("SparkA11y", "Service connected")
         serviceInfo = AccessibilityServiceInfo().apply {
             eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
-                         AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+                         AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED or
+                         AccessibilityEvent.TYPE_WINDOWS_CHANGED
             feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
             notificationTimeout = 100
         }
@@ -32,6 +35,11 @@ class SparkAccessibilityService : AccessibilityService() {
         val pkg = event.packageName?.toString() ?: return
         if (pkg == packageName) return
         val networkId = AppMonitorService.PKG_TO_ID[pkg] ?: return
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+            val now = System.currentTimeMillis()
+            if (now - (lastContentChangedMs[pkg] ?: 0L) < 500L) return
+            lastContentChangedMs[pkg] = now
+        }
         handlePackageDetected(pkg, networkId)
     }
 

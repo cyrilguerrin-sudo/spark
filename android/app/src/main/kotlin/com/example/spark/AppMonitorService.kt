@@ -54,7 +54,6 @@ class AppMonitorService : Service() {
         private const val NOTIF_ID_ALERT   = 43
         private const val TAG        = "SparkMonitor"
         private const val POLL_MS     = 500L
-        private const val COOLDOWN_MS = 30_000L  // 30s — couvre le lag UsageStats + durée intention
         private const val BLOCK_COOLDOWN_MS           = 2_000L   // 2s — anti-spam pour l'écran de blocage
         private const val SILENT_CLOSE_TIMEOUT_MS      = 45_000L  // 45s sans foreground → reset silencieux
         private const val SESSION_FOREGROUND_WINDOW_MS = 10_000L   // 10s — détection rapide foreground/background
@@ -73,7 +72,6 @@ class AppMonitorService : Service() {
     }
 
     private val handler = Handler(Looper.getMainLooper())
-    private val lastIntercepted = mutableMapOf<String, Long>()
     private val lastBlocked = mutableMapOf<String, Long>()
     private var isPolling = false
     private var overlayView: View? = null
@@ -194,16 +192,15 @@ class AppMonitorService : Service() {
         if (!monitored.contains(pkg)) return
 
         val active = prefs.getStringSet(KEY_ACTIVE, emptySet()) ?: emptySet()
-        if (active.contains(pkg)) return
-
-        if ((now - (lastIntercepted[pkg] ?: 0L)) < COOLDOWN_MS) return
+        val sessionEndTime = prefs.getLong(KEY_SESSION_END_TIME, 0L)
+        val remainingMs    = prefs.getLong(KEY_SESSION_REMAINING_MS, 0L)
+        if (active.contains(pkg) && (sessionEndTime > 0L || remainingMs > 0L)) return
 
         val focusActive = prefs.getBoolean(KEY_FOCUS_ACTIVE, false)
         val focusPkgs   = prefs.getStringSet(KEY_FOCUS_PKGS, emptySet()) ?: emptySet()
         if (focusActive && !focusPkgs.contains(pkg)) return
 
         val networkId = PKG_TO_ID[pkg] ?: return
-        lastIntercepted[pkg] = now
 
         val launchIntent = Intent(this, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
