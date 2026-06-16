@@ -28,15 +28,6 @@ class SessionTimerScreen extends ConsumerStatefulWidget {
 
 class _SessionTimerScreenState extends ConsumerState<SessionTimerScreen> {
   int _selectedMinutes = 0;
-  late final int _maxMinutes;
-
-  @override
-  void initState() {
-    super.initState();
-    _maxMinutes = ref
-        .read(sessionsProvider.notifier)
-        .maxSessionDuration(widget.networkId);
-  }
 
   Future<void> _launchSession() async {
     final session = Session(
@@ -108,23 +99,11 @@ class _SessionTimerScreenState extends ConsumerState<SessionTimerScreen> {
                       ),
                       child: TimeSlider(
                         value: _selectedMinutes,
-                        maxMinutes: _maxMinutes,
+                        maxMinutes: AppDurations.sessionTimerMaxMinutes,
                         onChanged: (v) =>
                             setState(() => _selectedMinutes = v),
                       ),
                     ),
-
-                    // Indication max réduit (2ème session)
-                    if (_maxMinutes == AppDurations.sessionTimerMaxMinutesRepeated)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Text(
-                          'Limite réduite à 10 min (2ème session aujourd\'hui)',
-                          style: AppTextStyles.caption.copyWith(
-                            color: AppColors.orange,
-                          ),
-                        ),
-                      ),
                   ],
                 ),
               ),
