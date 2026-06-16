@@ -76,13 +76,6 @@ class _SparkAppState extends ConsumerState<SparkApp> {
       final isFocus = args['isFocus'] as bool? ?? false;
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        // Si le timer Dart a aussi expiré → session-end plutôt qu'intention
-        final timer = ref.read(sessionTimerProvider);
-        if (timer.status == TimerStatus.expired && timer.networkId == networkId) {
-          ref.read(sessionTimerProvider.notifier).reset();
-          appRouter.go('/session-end', extra: {'networkId': networkId});
-          return;
-        }
         if (isFocus) {
           appRouter.go('/focus-blocked', extra: {'networkId': networkId});
         } else {
@@ -100,8 +93,7 @@ class _SparkAppState extends ConsumerState<SparkApp> {
     final focus    = ref.read(focusProvider);
     final timer    = ref.read(sessionTimerProvider);
 
-    final sessionActive = timer.status == TimerStatus.running ||
-        timer.status == TimerStatus.expired;
+    final sessionActive = timer.isActive;
 
     MonitorService.updateConfig(
       monitoredNetworkIds: networks

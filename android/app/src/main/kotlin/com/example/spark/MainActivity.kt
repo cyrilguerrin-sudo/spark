@@ -130,6 +130,8 @@ class MainActivity : FlutterActivity() {
                         .edit()
                         .putLong(AppMonitorService.KEY_SESSION_END_TIME, 0L)
                         .putString(AppMonitorService.KEY_SESSION_NETWORK_ID, "")
+                        .putLong(AppMonitorService.KEY_SESSION_REMAINING_MS, 0L)
+                        .putLong(AppMonitorService.KEY_SESSION_PAUSED_AT_MS, 0L)
                         .apply()
                     result.success(null)
                 }

@@ -39,21 +39,6 @@ class DashboardScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // ── Listener : timer expiré → session_end_screen ────────────────────────
-    ref.listen<SessionTimerState>(sessionTimerProvider, (_, next) {
-      if (next.status == TimerStatus.expired) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (context.mounted) {
-            // Ramène Spark au premier plan si l'utilisateur est sur le réseau social
-            MonitorService.bringToFront();
-            // NE PAS reset ici — le reset se fait dans session_end_screen
-            // quand l'utilisateur fait son choix (continuer ou redirection)
-            context.push('/session-end', extra: {'networkId': next.networkId});
-          }
-        });
-      }
-    });
-
     final sessions = ref.watch(sessionsProvider);
     final focusSession = ref.watch(focusProvider);
     final enabledNetworks = ref.watch(networksProvider)
@@ -238,16 +223,8 @@ class _FocusActiveBar extends ConsumerWidget {
     required this.onStop,
   });
 
-  String _fmt(Duration d) {
-    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$m:$s';
-  }
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final timer = ref.watch(sessionTimerProvider);
-
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 22),
       child: Container(
@@ -280,17 +257,6 @@ class _FocusActiveBar extends ConsumerWidget {
                   ),
                 ),
                 const Spacer(),
-                if (timer.isActive)
-                  Text(
-                    _fmt(timer.remaining),
-                    style: const TextStyle(
-                      fontFamily: 'Inter',
-                      fontWeight: FontWeight.w700,
-                      fontSize: 15,
-                      color: AppColors.orange,
-                      letterSpacing: -0.5,
-                    ),
-                  ),
                 const SizedBox(width: 10),
                 GestureDetector(
                   onTap: onStop,

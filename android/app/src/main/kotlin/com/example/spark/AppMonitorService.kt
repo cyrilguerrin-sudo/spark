@@ -142,6 +142,11 @@ class AppMonitorService : Service() {
                 }
             } else {
                 when {
+                    sessionEndTime > 0L && now >= sessionEndTime -> {
+                        prefs.edit().putLong(KEY_SESSION_END_TIME, 0L).apply()
+                        handleSessionEnd(sessionNetworkId)
+                        return
+                    }
                     sessionEndTime > 0L -> {
                         // Passer en pause : sauvegarder le temps restant
                         prefs.edit()
