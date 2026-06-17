@@ -50,6 +50,12 @@ class StorageService {
 
   // ── Profil utilisateur ──────────────────────────────────────────────────────
 
+  static String get pseudo =>
+      user.get('pseudo', defaultValue: '') as String;
+
+  static Future<void> savePseudo(String value) =>
+      user.put('pseudo', value);
+
   static String get firstName =>
       user.get('firstName', defaultValue: '') as String;
 

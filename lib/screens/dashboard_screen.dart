@@ -10,8 +10,8 @@ class DashboardScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final firstName = StorageService.firstName;
-    final greeting  = firstName.isEmpty ? 'Salut !' : 'Salut $firstName !';
+    final pseudo   = StorageService.pseudo;
+    final greeting = pseudo.isEmpty ? 'Salut !' : 'Salut $pseudo !';
 
     return Scaffold(
       backgroundColor: Colors.transparent,

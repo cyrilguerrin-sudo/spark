@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../core/theme.dart';
 import '../core/constants.dart';
-import '../services/permission_service.dart';
 import '../services/storage_service.dart';
 import '../widgets/bottom_nav.dart';
-import '../widgets/permission_card.dart';
 
 class ProfilScreen extends StatefulWidget {
   const ProfilScreen({super.key});
@@ -14,16 +13,8 @@ class ProfilScreen extends StatefulWidget {
   State<ProfilScreen> createState() => _ProfilScreenState();
 }
 
-class _ProfilScreenState extends State<ProfilScreen>
-    with WidgetsBindingObserver {
-  late final TextEditingController _nomController;
-  late final TextEditingController _prenomController;
-  late final TextEditingController _emailController;
-
-  bool _hasUsageStats = false;
-  bool _hasOverlay = false;
-  bool _hasDeviceAdmin = false;
-  bool _hasAccessibility = false;
+class _ProfilScreenState extends State<ProfilScreen> {
+  late final TextEditingController _pseudoController;
 
   static const _frMonths = [
     '',
@@ -34,44 +25,17 @@ class _ProfilScreenState extends State<ProfilScreen>
   @override
   void initState() {
     super.initState();
-    _nomController = TextEditingController(text: StorageService.lastName);
-    _prenomController = TextEditingController(text: StorageService.firstName);
-    _emailController = TextEditingController(text: StorageService.email);
-    WidgetsBinding.instance.addObserver(this);
-    _checkPermissions();
+    _pseudoController = TextEditingController(text: StorageService.pseudo);
   }
 
   @override
   void dispose() {
-    _nomController.dispose();
-    _prenomController.dispose();
-    _emailController.dispose();
-    WidgetsBinding.instance.removeObserver(this);
+    _pseudoController.dispose();
     super.dispose();
   }
 
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _checkPermissions();
-  }
-
-  Future<void> _checkPermissions() async {
-    final result = await PermissionService.checkAll();
-    if (!mounted) return;
-    setState(() {
-      _hasUsageStats = result.usageStats;
-      _hasOverlay = result.overlay;
-      _hasDeviceAdmin = result.deviceAdmin;
-      _hasAccessibility = result.accessibility;
-    });
-  }
-
-  Future<void> _save() async {
-    await StorageService.saveProfile(
-      firstName: _prenomController.text.trim(),
-      lastName: _nomController.text.trim(),
-      email: _emailController.text.trim(),
-    );
+  Future<void> _savePseudo() async {
+    await StorageService.savePseudo(_pseudoController.text.trim());
   }
 
   String _formatMemberSince() {
@@ -82,6 +46,13 @@ class _ProfilScreenState extends State<ProfilScreen>
       return '${date.day} ${_frMonths[date.month]} ${date.year}';
     } catch (_) {
       return '';
+    }
+  }
+
+  Future<void> _openWhatsApp() async {
+    final uri = Uri.parse('https://chat.whatsapp.com/C82xK0M64No4UowvOyCe0c');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
   }
 
@@ -100,98 +71,39 @@ class _ProfilScreenState extends State<ProfilScreen>
                 children: [
                   const SizedBox(height: 32),
 
-                  // ── Profil ──
-                  _FieldSection(
-                    label: 'Nom',
-                    controller: _nomController,
-                    onDone: _save,
-                  ),
-                  const SizedBox(height: 16),
-
-                  _FieldSection(
-                    label: 'Prénom',
-                    controller: _prenomController,
-                    onDone: _save,
-                  ),
-                  const SizedBox(height: 16),
-
-                  _FieldSection(
-                    label: 'Email',
-                    controller: _emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    onDone: _save,
-                  ),
-                  const SizedBox(height: 16),
-
-                  const _FieldSection(
-                    label: 'Mot de passe',
-                    isPassword: true,
-                  ),
-                  const SizedBox(height: 8),
-
-                  GestureDetector(
-                    onTap: () {},
-                    child: const Text(
-                      'Mot de passe oublié ?',
-                      style: AppTextStyles.caption,
-                    ),
-                  ),
-
-                  const SizedBox(height: 36),
-
-                  // ── Autorisations ──
+                  // ── Pseudo ──
                   const Text(
-                    'Autorisations',
+                    'Pseudo',
                     style: TextStyle(
                       fontFamily: 'Inter',
                       fontWeight: FontWeight.w700,
-                      fontSize: 18,
-                      letterSpacing: -0.9,
-                      color: AppColors.textSecondary,
+                      fontSize: 15,
+                      color: AppColors.textPrimary,
+                      letterSpacing: -0.4,
                     ),
                   ),
-                  const SizedBox(height: 12),
-
-                  PermissionCard(
-                    icon: Icons.bar_chart_rounded,
-                    title: 'Accès à l\'utilisation',
-                    description:
-                        'Permet à Spark de détecter quand tu ouvres une app surveillée.',
-                    isGranted: _hasUsageStats,
-                    onActivate: PermissionService.openUsageStatsSettings,
-                  ),
-                  const SizedBox(height: 10),
-
-                  PermissionCard(
-                    icon: Icons.layers_rounded,
-                    title: 'Affichage par-dessus les apps',
-                    description:
-                        'Permet à Spark d\'afficher ses écrans par-dessus Instagram et les autres apps.',
-                    isGranted: _hasOverlay,
-                    onActivate: PermissionService.openOverlaySettings,
-                  ),
-                  const SizedBox(height: 10),
-
-                  PermissionCard(
-                    icon: Icons.lock_rounded,
-                    title: 'Administrateur de l\'appareil',
-                    description:
-                        'Spark verrouille l\'écran quand ta session se termine.',
-                    isGranted: _hasDeviceAdmin,
-                    onActivate: PermissionService.openDeviceAdminSettings,
-                  ),
-                  const SizedBox(height: 10),
-
-                  PermissionCard(
-                    icon: Icons.accessibility_new_rounded,
-                    title: 'Service d\'accessibilité',
-                    description:
-                        'Détection instantanée de l\'ouverture des apps, comme OneSec. Aucune donnée transmise hors de l\'appareil.',
-                    isGranted: _hasAccessibility,
-                    onActivate: PermissionService.openAccessibilitySettings,
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _pseudoController,
+                    textInputAction: TextInputAction.done,
+                    style: AppTextStyles.body.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                    decoration: const InputDecoration(
+                      hintText: 'Ton pseudo',
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 16,
+                      ),
+                    ),
+                    onEditingComplete: () {
+                      FocusScope.of(context).unfocus();
+                      _savePseudo();
+                    },
+                    onTapOutside: (_) => _savePseudo(),
                   ),
 
-                  const SizedBox(height: 36),
+                  const SizedBox(height: 48),
 
                   // ── Membre depuis ──
                   if (memberSince.isNotEmpty)
@@ -215,6 +127,32 @@ class _ProfilScreenState extends State<ProfilScreen>
                     ),
 
                   const SizedBox(height: 32),
+
+                  // ── Communauté WhatsApp ──
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _openWhatsApp,
+                      icon: const Icon(Icons.chat_bubble_outline, size: 18),
+                      label: const Text('Rejoindre la communauté WhatsApp'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF25D366),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        textStyle: const TextStyle(
+                          fontFamily: 'Inter',
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15,
+                          letterSpacing: -0.3,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(AppRadius.button),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 32),
                 ],
               ),
             ),
@@ -229,64 +167,6 @@ class _ProfilScreenState extends State<ProfilScreen>
           ],
         ),
       ),
-    );
-  }
-}
-
-// ── Champ formulaire ────────────────────────────────────────────────────────
-
-class _FieldSection extends StatelessWidget {
-  final String label;
-  final TextEditingController? controller;
-  final bool isPassword;
-  final TextInputType keyboardType;
-  final VoidCallback? onDone;
-
-  const _FieldSection({
-    required this.label,
-    this.controller,
-    this.isPassword = false,
-    this.keyboardType = TextInputType.text,
-    this.onDone,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontFamily: 'Inter',
-            fontWeight: FontWeight.w700,
-            fontSize: 15,
-            color: AppColors.textPrimary,
-            letterSpacing: -0.4,
-          ),
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: controller,
-          obscureText: isPassword,
-          keyboardType: keyboardType,
-          textInputAction:
-              isPassword ? TextInputAction.done : TextInputAction.next,
-          style: AppTextStyles.body.copyWith(color: AppColors.textSecondary),
-          decoration: InputDecoration(
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: 16,
-            ),
-            hintText: isPassword ? '••••••••' : null,
-          ),
-          onEditingComplete: () {
-            FocusScope.of(context).nextFocus();
-            onDone?.call();
-          },
-          readOnly: isPassword,
-        ),
-      ],
     );
   }
 }
