@@ -26,10 +26,14 @@ class _SparkAppState extends ConsumerState<SparkApp> {
     super.initState();
     _channel.setMethodCallHandler(_handleNativeCall);
     MonitorService.start();
-    // Écrire l'état réel des providers dans SharedPreferences dès le démarrage.
-    // Sans ça, KEY_ACTIVE peut rester stale d'une session précédente si l'app
-    // a été tuée pendant qu'une session était active, bloquant toute interception.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _syncConfig());
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // 1) Réhydrate focusProvider depuis les SharedPreferences natives AVANT
+      //    _syncConfig(), sinon focusProvider = null écrase KEY_FOCUS_ACTIVE = true.
+      await ref.read(focusProvider.notifier).loadFromNative();
+      // 2) Maintenant focusProvider reflète l'état réel → _syncConfig() écrit
+      //    la bonne valeur de KEY_FOCUS_ACTIVE (et non toujours false).
+      _syncConfig();
+    });
   }
 
   /// Appelé par AppMonitorService (via MainActivity).

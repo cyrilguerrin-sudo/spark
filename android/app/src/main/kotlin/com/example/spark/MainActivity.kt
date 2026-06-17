@@ -156,6 +156,32 @@ class MainActivity : FlutterActivity() {
                         .apply()
                     result.success(null)
                 }
+                "setFocusMode" -> {
+                    val args = call.arguments as Map<*, *>
+                    val active    = args["active"] as? Boolean ?: false
+                    val objective = args["objective"] as? String ?: ""
+                    @Suppress("UNCHECKED_CAST")
+                    val packages  = (args["packages"] as? List<*>)
+                        ?.map { it.toString() }?.toSet() ?: emptySet<String>()
+                    getSharedPreferences(AppMonitorService.PREFS, Context.MODE_PRIVATE)
+                        .edit()
+                        .putBoolean(AppMonitorService.KEY_FOCUS_ACTIVE, active)
+                        .putStringSet(AppMonitorService.KEY_FOCUS_PKGS, packages)
+                        .putString(AppMonitorService.KEY_FOCUS_OBJECTIVE, objective)
+                        .apply()
+                    result.success(null)
+                }
+                "getFocusMode" -> {
+                    val prefs = getSharedPreferences(AppMonitorService.PREFS, Context.MODE_PRIVATE)
+                    val active    = prefs.getBoolean(AppMonitorService.KEY_FOCUS_ACTIVE, false)
+                    val objective = prefs.getString(AppMonitorService.KEY_FOCUS_OBJECTIVE, "") ?: ""
+                    val packages  = (prefs.getStringSet(AppMonitorService.KEY_FOCUS_PKGS, emptySet()) ?: emptySet()).toList()
+                    result.success(mapOf(
+                        "active"    to active,
+                        "objective" to objective,
+                        "packages"  to packages,
+                    ))
+                }
                 "bringToFront" -> {
                     val i = Intent(this, MainActivity::class.java).apply {
                         addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)

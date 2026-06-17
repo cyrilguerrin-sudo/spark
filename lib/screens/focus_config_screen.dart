@@ -45,13 +45,13 @@ class _FocusConfigScreenState extends ConsumerState<FocusConfigScreen> {
     });
   }
 
-  void _launchSession() {
+  Future<void> _launchSession() async {
     final objective = _objectiveController.text.trim();
-    ref.read(focusProvider.notifier).startSession(
+    await ref.read(focusProvider.notifier).activate(
           objective: objective.isEmpty ? 'Session Focus' : objective,
           blockedApps: List.from(_selectedApps),
         );
-    context.go('/dashboard');
+    if (mounted) context.go('/dashboard');
   }
 
   @override

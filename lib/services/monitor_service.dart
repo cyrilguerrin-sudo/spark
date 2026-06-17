@@ -67,6 +67,50 @@ class MonitorService {
     } catch (_) {}
   }
 
+  /// Active ou désactive le mode Focus côté natif.
+  /// [networkIds] sont des identifiants Spark ("instagram", "tiktok"…).
+  static Future<void> setFocusMode({
+    required bool active,
+    required List<String> networkIds,
+    required String objective,
+  }) async {
+    String? toPkg(String id) => AppNetworks.androidPackages[id];
+    final packages = networkIds.map(toPkg).whereType<String>().toList();
+    try {
+      await _channel.invokeMethod('setFocusMode', {
+        'active':    active,
+        'packages':  packages,
+        'objective': objective,
+      });
+    } catch (_) {}
+  }
+
+  /// Retourne l'état Focus actuel depuis les SharedPreferences natives.
+  /// Les packages Android sont convertis en networkIds Flutter ("instagram", …).
+  static Future<Map<String, dynamic>> getFocusState() async {
+    try {
+      final result = await _channel.invokeMethod<Map>('getFocusMode');
+      if (result == null) {
+        return {'active': false, 'objective': '', 'networkIds': <String>[]};
+      }
+      final packages = (result['packages'] as List?)?.cast<String>() ?? [];
+      final networkIds = packages
+          .map((pkg) => AppNetworks.androidPackages.entries
+              .firstWhere((e) => e.value == pkg,
+                  orElse: () => const MapEntry('', ''))
+              .key)
+          .where((id) => id.isNotEmpty)
+          .toList();
+      return {
+        'active':     result['active']    as bool?   ?? false,
+        'objective':  result['objective'] as String? ?? '',
+        'networkIds': networkIds,
+      };
+    } catch (_) {
+      return {'active': false, 'objective': '', 'networkIds': <String>[]};
+    }
+  }
+
   /// Synchronise la config de surveillance (apps monitorées, session active, focus).
   /// Ne touche plus au timestamp de fin de session — géré par setSessionEndTime.
   static Future<void> updateConfig({

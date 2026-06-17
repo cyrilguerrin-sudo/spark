@@ -35,6 +35,7 @@ class AppMonitorService : Service() {
         const val KEY_ACTIVE             = "active_sessions"
         const val KEY_FOCUS_ACTIVE       = "focus_active"
         const val KEY_FOCUS_PKGS         = "focus_packages"
+        const val KEY_FOCUS_OBJECTIVE    = "focus_objective"
         // Timestamp Unix (ms) de fin de session — surveillé par le service
         // pour déclencher la fin même quand Flutter est en arrière-plan.
         const val KEY_SESSION_END_TIME   = "session_end_time"
@@ -194,6 +195,22 @@ class AppMonitorService : Service() {
             }
         }
 
+        // ── Interception Focus (prioritaire sur l'interception normale) ──────
+        val focusActive = prefs.getBoolean(KEY_FOCUS_ACTIVE, false)
+        val focusPkgs   = prefs.getStringSet(KEY_FOCUS_PKGS, emptySet()) ?: emptySet()
+        if (focusActive && focusPkgs.contains(pkg)) {
+            val networkId = PKG_TO_ID[pkg] ?: return
+            if ((now - (lastBlocked[pkg] ?: 0L)) >= BLOCK_COOLDOWN_MS) {
+                lastBlocked[pkg] = now
+                startActivity(Intent(this, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                    putExtra(EXTRA_NETWORK_ID, networkId)
+                    putExtra(EXTRA_IS_FOCUS, true)
+                })
+            }
+            return
+        }
+
         // ── Interception normale ──────────────────────────────────────────────
         val monitored = prefs.getStringSet(KEY_MONITORED, emptySet()) ?: emptySet()
         if (!monitored.contains(pkg)) return
@@ -203,18 +220,16 @@ class AppMonitorService : Service() {
         val remainingMs    = prefs.getLong(KEY_SESSION_REMAINING_MS, 0L)
         if (active.contains(pkg) && (sessionEndTime > 0L || remainingMs > 0L)) return
 
-        val focusActive = prefs.getBoolean(KEY_FOCUS_ACTIVE, false)
-        val focusPkgs   = prefs.getStringSet(KEY_FOCUS_PKGS, emptySet()) ?: emptySet()
-        if (focusActive && !focusPkgs.contains(pkg)) return
+        // Focus actif mais ce package n'est pas bloqué → ne pas intercepter
+        if (focusActive) return
 
         val networkId = PKG_TO_ID[pkg] ?: return
 
-        val launchIntent = Intent(this, MainActivity::class.java).apply {
+        startActivity(Intent(this, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
             putExtra(EXTRA_NETWORK_ID, networkId)
-            putExtra(EXTRA_IS_FOCUS, focusActive && focusPkgs.contains(pkg))
-        }
-        startActivity(launchIntent)
+            putExtra(EXTRA_IS_FOCUS, false)
+        })
     }
 
     private fun getForegroundPackage(): String? {
