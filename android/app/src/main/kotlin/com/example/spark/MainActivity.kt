@@ -203,6 +203,15 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
 
+                "goToHomeScreen" -> {
+                    val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                        addCategory(Intent.CATEGORY_HOME)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(homeIntent)
+                    result.success(null)
+                }
+
                 else -> result.notImplemented()
             }
         }

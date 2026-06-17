@@ -111,6 +111,13 @@ class MonitorService {
     }
   }
 
+  /// Revient à l'écran d'accueil Android (launcher) sans fermer l'app.
+  static Future<void> goToHomeScreen() async {
+    try {
+      await _channel.invokeMethod('goToHomeScreen');
+    } catch (_) {}
+  }
+
   /// Synchronise la config de surveillance (apps monitorées, session active, focus).
   /// Ne touche plus au timestamp de fin de session — géré par setSessionEndTime.
   static Future<void> updateConfig({
