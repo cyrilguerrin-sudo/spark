@@ -82,34 +82,13 @@ class _PermissionsScreenState extends State<PermissionsScreen>
                     ),
                     const SizedBox(height: 36),
 
-                    const Text(
-                      'Autorisations\nnécessaires',
-                      style: AppTextStyles.titleLarge,
-                    ),
-                    const SizedBox(height: 10),
-
-                    const Text(
-                      'Pour que Spark puisse surveiller tes apps et verrouiller l\'écran à la fin de ta session, ces trois autorisations sont requises.',
-                      style: AppTextStyles.body,
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Tes données restent entièrement sur ton téléphone.',
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontWeight: FontWeight.w500,
-                        fontSize: 12,
-                        color: AppColors.textMuted,
-                        letterSpacing: -0.3,
-                      ),
-                    ),
                     const SizedBox(height: 32),
 
                     PermissionCard(
                       icon: Icons.bar_chart_rounded,
                       title: 'Accès à l\'utilisation',
                       description:
-                          'Permet à Spark de détecter quand tu ouvres une app surveillée.',
+                          'Permet à Spark de détecter quand tu ouvres un réseau surveillé.',
                       isGranted: _hasUsageStats,
                       onActivate: PermissionService.openUsageStatsSettings,
                     ),
@@ -129,7 +108,7 @@ class _PermissionsScreenState extends State<PermissionsScreen>
                       icon: Icons.lock_rounded,
                       title: 'Administrateur de l\'appareil',
                       description:
-                          'Spark verrouille l\'écran quand ta session se termine. Fonctionne sur tous les appareils.',
+                          'Spark verrouille l\'écran quand ta session se termine.',
                       isGranted: _hasDeviceAdmin,
                       onActivate: PermissionService.openDeviceAdminSettings,
                     ),
@@ -139,7 +118,7 @@ class _PermissionsScreenState extends State<PermissionsScreen>
                       icon: Icons.accessibility_new_rounded,
                       title: 'Service d\'accessibilité',
                       description:
-                          'Détection instantanée de l\'ouverture des apps, comme OneSec. Aucune donnée transmise hors de l\'appareil.',
+                          'Permet à Spark de détecter quand tu ouvres un réseau surveillé.',
                       isGranted: _hasAccessibility,
                       onActivate: PermissionService.openAccessibilitySettings,
                     ),

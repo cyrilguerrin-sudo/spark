@@ -32,18 +32,10 @@ class FocusBlockedScreen extends ConsumerWidget {
                     Stack(
                       alignment: Alignment.center,
                       children: [
-                        Container(
-                          width: 240,
-                          height: 240,
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: RadialGradient(
-                              colors: [
-                                Color(0x33FF5500),
-                                Color(0x00FF5500),
-                              ],
-                            ),
-                          ),
+                        Image.asset(
+                          'assets/images/flame_glow.png',
+                          height: 208,
+                          fit: BoxFit.contain,
                         ),
                         Image.asset(
                           'assets/images/flame_3d.png',

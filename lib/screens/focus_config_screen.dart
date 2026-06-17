@@ -197,15 +197,10 @@ class _SmallFlame extends StatelessWidget {
     return Stack(
       alignment: Alignment.center,
       children: [
-        Container(
-          width: 140,
-          height: 140,
-          decoration: const BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: RadialGradient(
-              colors: [Color(0x26FF5500), Color(0x00FF5500)],
-            ),
-          ),
+        Image.asset(
+          'assets/images/flame_glow.png',
+          height: 117,
+          fit: BoxFit.contain,
         ),
         Image.asset(
           'assets/images/flame_3d.png',

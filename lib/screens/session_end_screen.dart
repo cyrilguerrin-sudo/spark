@@ -290,15 +290,10 @@ class _SessionEndScreenState extends ConsumerState<SessionEndScreen> {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          Container(
-            width: 300,
-            height: 300,
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: RadialGradient(
-                colors: [Color(0x50FF5500), Color(0x00FF5500)],
-              ),
-            ),
+          Image.asset(
+            'assets/images/flame_glow.png',
+            height: 260,
+            fit: BoxFit.contain,
           ),
           Image.asset(
             'assets/images/flame_3d.png',
