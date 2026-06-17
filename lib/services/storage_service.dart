@@ -23,7 +23,7 @@ class StorageService {
   // ── Réseaux sociaux ─────────────────────────────────────────────────────────
 
   static bool getNetworkEnabled(String id) =>
-      networks.get('${id}_enabled', defaultValue: false) as bool;
+      networks.get('${id}_enabled', defaultValue: true) as bool;
 
   static Future<void> setNetworkEnabled(String id, bool value) =>
       networks.put('${id}_enabled', value);

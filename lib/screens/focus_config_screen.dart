@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../core/theme.dart';
 import '../core/constants.dart';
-import '../providers/networks_provider.dart';
 import '../providers/focus_provider.dart';
 
 class FocusConfigScreen extends ConsumerStatefulWidget {
@@ -15,18 +14,11 @@ class FocusConfigScreen extends ConsumerStatefulWidget {
 
 class _FocusConfigScreenState extends ConsumerState<FocusConfigScreen> {
   late final TextEditingController _objectiveController;
-  late List<String> _selectedApps;
 
   @override
   void initState() {
     super.initState();
     _objectiveController = TextEditingController();
-    // Pré-cocher tous les réseaux activés dans l'onglet Edit
-    _selectedApps = ref
-        .read(networksProvider)
-        .where((n) => n.isEnabled)
-        .map((n) => n.id)
-        .toList();
   }
 
   @override
@@ -35,30 +27,21 @@ class _FocusConfigScreenState extends ConsumerState<FocusConfigScreen> {
     super.dispose();
   }
 
-  void _toggleApp(String networkId) {
-    setState(() {
-      if (_selectedApps.contains(networkId)) {
-        _selectedApps.remove(networkId);
-      } else {
-        _selectedApps.add(networkId);
-      }
-    });
-  }
-
   Future<void> _launchSession() async {
     final objective = _objectiveController.text.trim();
     await ref.read(focusProvider.notifier).activate(
           objective: objective.isEmpty ? 'Session Focus' : objective,
-          blockedApps: List.from(_selectedApps),
+          blockedApps: [
+            AppNetworks.instagram,
+            AppNetworks.tiktok,
+            AppNetworks.youtube,
+          ],
         );
     if (mounted) context.go('/dashboard');
   }
 
   @override
   Widget build(BuildContext context) {
-    final enabledNetworks =
-        ref.watch(networksProvider).where((n) => n.isEnabled).toList();
-
     return Scaffold(
       backgroundColor: AppColors.bgPrimary,
       body: SafeArea(
@@ -84,11 +67,9 @@ class _FocusConfigScreenState extends ConsumerState<FocusConfigScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    // Flamme + lueur (petite)
                     const _SmallFlame(),
                     const SizedBox(height: 24),
 
-                    // Question
                     const Text(
                       AppStrings.focusConfigQuestion,
                       textAlign: TextAlign.center,
@@ -103,7 +84,6 @@ class _FocusConfigScreenState extends ConsumerState<FocusConfigScreen> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Champ objectif
                     TextField(
                       controller: _objectiveController,
                       textAlign: TextAlign.center,
@@ -119,7 +99,6 @@ class _FocusConfigScreenState extends ConsumerState<FocusConfigScreen> {
                     ),
                     const SizedBox(height: 28),
 
-                    // Label "Apps bloquées :"
                     const Text(
                       AppStrings.focusConfigBlockedApps,
                       style: TextStyle(
@@ -132,32 +111,41 @@ class _FocusConfigScreenState extends ConsumerState<FocusConfigScreen> {
                     ),
                     const SizedBox(height: 14),
 
-                    // Chips des apps
-                    if (enabledNetworks.isEmpty)
-                      Text(
-                        'Active des réseaux dans l\'onglet Edit',
-                        style: AppTextStyles.body
-                            .copyWith(color: AppColors.textMuted),
-                        textAlign: TextAlign.center,
-                      )
-                    else
-                      Column(
-                        children: enabledNetworks
-                            .map(
-                              (n) => Padding(
-                                padding: const EdgeInsets.only(bottom: 10),
-                                child: _AppChip(
-                                  name: n.name,
-                                  selected: _selectedApps.contains(n.id),
-                                  onTap: () => _toggleApp(n.id),
-                                ),
+                    for (final id in [
+                      AppNetworks.instagram,
+                      AppNetworks.tiktok,
+                      AppNetworks.youtube,
+                    ])
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          decoration: BoxDecoration(
+                            color: AppColors.bgCardSurface,
+                            borderRadius:
+                                BorderRadius.circular(AppRadius.button),
+                            border: Border.all(
+                              color: AppColors.bgCardBorder,
+                              width: 1,
+                            ),
+                          ),
+                          child: Center(
+                            child: Text(
+                              AppNetworks.names[id]!,
+                              style: const TextStyle(
+                                fontFamily: 'Inter',
+                                fontWeight: FontWeight.w600,
+                                fontSize: 15,
+                                color: AppColors.textPrimary,
+                                letterSpacing: -0.3,
                               ),
-                            )
-                            .toList(),
+                            ),
+                          ),
+                        ),
                       ),
                     const SizedBox(height: 20),
 
-                    // Note
                     Text(
                       AppStrings.focusConfigNote,
                       textAlign: TextAlign.center,
@@ -167,7 +155,6 @@ class _FocusConfigScreenState extends ConsumerState<FocusConfigScreen> {
                     ),
                     const SizedBox(height: 24),
 
-                    // Bouton lancer
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
@@ -208,54 +195,6 @@ class _SmallFlame extends StatelessWidget {
           fit: BoxFit.contain,
         ),
       ],
-    );
-  }
-}
-
-// ── Chip d'application bloquée ───────────────────────────────────────────────
-
-class _AppChip extends StatelessWidget {
-  final String name;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _AppChip({
-    required this.name,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.bgCardSurface : Colors.transparent,
-          borderRadius: BorderRadius.circular(AppRadius.button),
-          border: Border.all(
-            color: selected
-                ? AppColors.bgCardBorder
-                : AppColors.textMuted.withValues(alpha: 0.4),
-            width: 1,
-          ),
-        ),
-        child: Center(
-          child: Text(
-            name,
-            style: TextStyle(
-              fontFamily: 'Inter',
-              fontWeight: FontWeight.w600,
-              fontSize: 15,
-              color: selected ? AppColors.textPrimary : AppColors.textMuted,
-              letterSpacing: -0.3,
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

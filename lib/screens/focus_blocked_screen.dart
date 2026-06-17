@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import '../core/theme.dart';
 import '../core/constants.dart';
 import '../providers/focus_provider.dart';
@@ -95,7 +95,7 @@ class FocusBlockedScreen extends ConsumerWidget {
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: () => context.go('/dashboard'),
+                      onPressed: () => SystemNavigator.pop(),
                       child: const Text('Fermer'),
                     ),
                   ),
