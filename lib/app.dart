@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +10,7 @@ import 'models/focus_session.dart';
 import 'providers/networks_provider.dart';
 import 'providers/focus_provider.dart';
 import 'providers/session_timer_provider.dart';
+import 'services/family_controls_service.dart';
 import 'services/monitor_service.dart';
 
 class SparkApp extends ConsumerStatefulWidget {
@@ -26,6 +28,7 @@ class _SparkAppState extends ConsumerState<SparkApp> {
     super.initState();
     _channel.setMethodCallHandler(_handleNativeCall);
     MonitorService.start();
+    if (Platform.isIOS) FamilyControlsService.init();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       // 1) Réhydrate focusProvider depuis les SharedPreferences natives AVANT
       //    _syncConfig(), sinon focusProvider = null écrase KEY_FOCUS_ACTIVE = true.
@@ -116,6 +119,32 @@ class _SparkAppState extends ConsumerState<SparkApp> {
     ref.listen<List<SocialNetwork>>(networksProvider,      (_, __) => _syncConfig());
     ref.listen<FocusSession?>(focusProvider,               (_, __) => _syncConfig());
     ref.listen<SessionTimerState>(sessionTimerProvider,    (_, __) => _syncConfig());
+
+    // iOS: écoute les événements natifs depuis Swift via FamilyControlsService.
+    // Remplace le MethodChannel Android (_handleNativeCall) pour onAppIntercepted
+    // et onSessionCancelled. onSessionEnded / onAppBlocked n'existent pas sur iOS
+    // (gérés par l'écran Shield natif).
+    if (Platform.isIOS) {
+      ref.listen<AsyncValue<IoNativeEvent>>(nativeEventProvider, (_, next) {
+        next.whenData((event) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            switch (event) {
+              case AppInterceptedEvent(:final networkId):
+                if (networkId.isNotEmpty) {
+                  final isFocus = ref.read(focusProvider) != null;
+                  if (isFocus) {
+                    appRouter.go('/focus-blocked', extra: {'networkId': networkId});
+                  } else {
+                    appRouter.go('/intention', extra: {'networkId': networkId});
+                  }
+                }
+              case SessionCancelledEvent():
+                ref.read(sessionTimerProvider.notifier).reset();
+            }
+          });
+        });
+      });
+    }
 
     return MaterialApp.router(
       title: AppStrings.appName,
