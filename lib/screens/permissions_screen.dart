@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../core/constants.dart';
 import '../core/theme.dart';
 import '../services/family_controls_service.dart';
 import '../services/permission_service.dart';
@@ -25,8 +26,13 @@ class _PermissionsScreenState extends State<PermissionsScreen>
 
   // ── iOS state ──────────────────────────────────────────────────────────────
   bool _hasFamilyControls = false;
-  // True while requestAuthorization + setMonitoredNetworks are in flight.
-  bool _isRequesting = false;
+  bool _isRequestingAuth  = false;
+  List<String> _configuredNetworks = [];
+  final Map<String, bool> _isPickingNetwork = {
+    AppNetworks.instagram: false,
+    AppNetworks.tiktok:    false,
+    AppNetworks.youtube:   false,
+  };
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -81,39 +87,69 @@ class _PermissionsScreenState extends State<PermissionsScreen>
 
   // ── iOS logic ──────────────────────────────────────────────────────────────
 
-  /// Checks FamilyControls status and auto-navigates if already authorized.
   Future<void> _checkIosPermissions() async {
     final auth = await FamilyControlsService.checkAuthorization();
     if (!mounted) return;
-    setState(() => _hasFamilyControls = auth);
-    if (auth) _continueFromIos();
+    if (!auth && StorageService.familyControlsAuthorized) {
+      await StorageService.setFamilyControlsAuthorized(false);
+    }
+    final networks = auth
+        ? await FamilyControlsService.getConfiguredNetworks()
+        : <String>[];
+    if (!mounted) return;
+    setState(() {
+      _hasFamilyControls   = auth;
+      _configuredNetworks  = networks;
+    });
+    if (auth && networks.isNotEmpty && StorageService.familyControlsAuthorized) {
+      _navigateToDashboard();
+    }
   }
 
-  /// Full authorization flow:
-  ///   1. System FamilyControls dialog (requestAuthorization)
-  ///   2. FamilyActivityPicker to select apps (setMonitoredNetworks)
-  ///   3. Navigate to /dashboard
-  Future<void> _requestFamilyControls() async {
-    if (_isRequesting) return;
-    setState(() => _isRequesting = true);
-
+  // Step A: request FamilyControls auth only (no picker).
+  Future<void> _requestFamilyControlsAuth() async {
+    if (_isRequestingAuth) return;
+    setState(() => _isRequestingAuth = true);
     final authorized = await FamilyControlsService.requestAuthorization();
     if (!mounted) return;
-
     if (authorized) {
-      setState(() => _hasFamilyControls = true);
-      // Present FamilyActivityPicker; awaits until user taps OK and picker dismisses.
-      await FamilyControlsService.setMonitoredNetworks();
+      final networks = await FamilyControlsService.getConfiguredNetworks();
       if (!mounted) return;
-      _continueFromIos();
-      return;
+      setState(() {
+        _hasFamilyControls  = true;
+        _configuredNetworks = networks;
+        _isRequestingAuth   = false;
+      });
+    } else {
+      setState(() => _isRequestingAuth = false);
     }
-
-    // Auth denied — reset loading state, card stays in "Activer" mode.
-    setState(() => _isRequesting = false);
   }
 
-  void _continueFromIos() {
+  // Step B: present picker for a single network.
+  Future<void> _pickNetwork(String network) async {
+    if (_isPickingNetwork[network] == true) return;
+    setState(() => _isPickingNetwork[network] = true);
+    debugPrint('[Spark] _pickNetwork($network) → setMonitoredNetwork start');
+    await FamilyControlsService.setMonitoredNetwork(network);
+    debugPrint('[Spark] _pickNetwork($network) → setMonitoredNetwork done');
+    if (!mounted) return;
+    final networks = await FamilyControlsService.getConfiguredNetworks();
+    debugPrint('[Spark] _pickNetwork($network) → getConfiguredNetworks = $networks');
+    if (!mounted) return;
+    setState(() {
+      _configuredNetworks        = networks;
+      _isPickingNetwork[network] = false;
+    });
+    debugPrint('[Spark] _pickNetwork($network) → setState done, configured=$_configuredNetworks');
+  }
+
+  Future<void> _onContinueIos() async {
+    await StorageService.setFamilyControlsAuthorized(true);
+    if (!mounted) return;
+    _navigateToDashboard();
+  }
+
+  void _navigateToDashboard() {
     context.go('/dashboard');
   }
 
@@ -238,7 +274,92 @@ class _PermissionsScreenState extends State<PermissionsScreen>
 
   // ── iOS screen ─────────────────────────────────────────────────────────────
 
+  Widget _networkRow(String networkId) {
+    final isConfigured = _configuredNetworks.contains(networkId);
+    final isPicking    = _isPickingNetwork[networkId] == true;
+    final name         = AppNetworks.names[networkId] ?? networkId;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: AppColors.bgCardSurface,
+        borderRadius: BorderRadius.circular(AppRadius.button),
+        border: Border.all(color: AppColors.bgCardBorder, width: 1),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: const TextStyle(
+                    fontFamily: 'Inter',
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                    color: AppColors.textPrimary,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  isConfigured ? 'Configuré ✓' : 'Non configuré',
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 13,
+                    color: isConfigured
+                        ? AppColors.green
+                        : AppColors.textMuted,
+                    letterSpacing: -0.2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (isPicking)
+            const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                  color: AppColors.orange, strokeWidth: 2),
+            )
+          else
+            GestureDetector(
+              onTap: () => _pickNetwork(networkId),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isConfigured
+                      ? AppColors.bgCardBorder
+                      : AppColors.orange,
+                  borderRadius: BorderRadius.circular(AppRadius.button),
+                ),
+                child: Text(
+                  isConfigured ? 'Modifier' : 'Sélectionner',
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                    color: isConfigured
+                        ? AppColors.textSecondary
+                        : Colors.white,
+                    letterSpacing: -0.2,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildIosScreen(BuildContext context) {
+    final canContinue =
+        _hasFamilyControls && _configuredNetworks.isNotEmpty && !_isRequestingAuth;
+
     return Scaffold(
       backgroundColor: AppColors.bgPrimary,
       body: SafeArea(
@@ -272,19 +393,21 @@ class _PermissionsScreenState extends State<PermissionsScreen>
                     ),
                     const SizedBox(height: 32),
 
+                    // ── Step A: FamilyControls auth ──────────────────────────
                     PermissionCard(
                       icon: Icons.phonelink_lock_rounded,
                       title: 'Screen Time',
                       description:
                           'Permet à Spark de surveiller l\'ouverture des réseaux sociaux '
-                          'et de bloquer l\'accès quand ta session se termine. '
-                          'Tu choisiras ensuite quelles apps surveiller.',
+                          'et de bloquer l\'accès quand ta session se termine.',
                       isGranted: _hasFamilyControls,
-                      onActivate: _isRequesting ? () {} : _requestFamilyControls,
+                      onActivate: _isRequestingAuth
+                          ? () {}
+                          : _requestFamilyControlsAuth,
                     ),
 
-                    if (_isRequesting) ...[
-                      const SizedBox(height: 20),
+                    if (_isRequestingAuth) ...[
+                      const SizedBox(height: 16),
                       const Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
@@ -305,29 +428,43 @@ class _PermissionsScreenState extends State<PermissionsScreen>
                       ),
                     ],
 
+                    // ── Step B: per-network pickers (shown after auth) ────────
+                    if (_hasFamilyControls) ...[
+                      const SizedBox(height: 32),
+                      const Text(
+                        'Réseaux à surveiller',
+                        style: AppTextStyles.sectionLabel,
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Sélectionne chaque app pour l\'associer à Spark.',
+                        style: AppTextStyles.body,
+                      ),
+                      const SizedBox(height: 16),
+                      _networkRow(AppNetworks.instagram),
+                      _networkRow(AppNetworks.tiktok),
+                      _networkRow(AppNetworks.youtube),
+                    ],
+
                     const SizedBox(height: 40),
                   ],
                 ),
               ),
             ),
 
-            // "Continuer" — enabled once FamilyControls is authorized.
-            // The user can reach this state either after the full flow above,
-            // or on a subsequent launch if already authorized.
             Padding(
               padding:
                   const EdgeInsets.symmetric(horizontal: 22, vertical: 24),
               child: SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed:
-                      (_hasFamilyControls && !_isRequesting) ? _continueFromIos : null,
+                  onPressed: canContinue ? _onContinueIos : null,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: _hasFamilyControls
+                    backgroundColor: canContinue
                         ? AppColors.textPrimary
                         : AppColors.bgCardSurface,
                     foregroundColor:
-                        _hasFamilyControls ? Colors.black : AppColors.textMuted,
+                        canContinue ? Colors.black : AppColors.textMuted,
                     disabledBackgroundColor: AppColors.bgCardSurface,
                     disabledForegroundColor: AppColors.textMuted,
                     padding: const EdgeInsets.symmetric(vertical: 18),

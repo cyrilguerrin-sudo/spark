@@ -1,0 +1,12 @@
+{
+  "data" : [
+    {
+      "filename" : "Runner-Bridging-Header.h",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

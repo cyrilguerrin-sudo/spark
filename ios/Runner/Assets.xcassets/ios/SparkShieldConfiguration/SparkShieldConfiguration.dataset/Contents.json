@@ -1,0 +1,12 @@
+{
+  "data" : [
+    {
+      "filename" : "SparkShieldConfiguration.entitlements",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

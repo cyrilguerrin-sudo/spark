@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,6 +7,7 @@ import '../core/theme.dart';
 import '../providers/focus_provider.dart';
 import '../services/storage_service.dart';
 import '../widgets/bottom_nav.dart';
+import '../widgets/hold_button.dart';
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
@@ -28,8 +30,7 @@ class DashboardScreen extends ConsumerWidget {
       greeting: greeting,
       onFocusTap: () => context.go('/focus-config'),
       onNavTap: (i) {
-        if (i == 1) context.go('/edit');
-        if (i == 2) context.go('/profil');
+        if (i == 1) context.go('/profil');
       },
     );
   }
@@ -69,39 +70,54 @@ class _NormalDashboard extends StatelessWidget {
               ),
               Expanded(
                 child: Center(
-                  child: GestureDetector(
-                    onTap: onFocusTap,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Stack(
-                          alignment: Alignment.center,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      GestureDetector(
+                        onTap: onFocusTap,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            Image.asset(
-                              'assets/images/flame_glow.png',
-                              height: 208,
-                              fit: BoxFit.contain,
+                            Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                Image.asset(
+                                  'assets/images/flame_glow.png',
+                                  height: 208,
+                                  fit: BoxFit.contain,
+                                ),
+                                Image.asset(
+                                  'assets/images/flame_3d.png',
+                                  height: 160,
+                                  fit: BoxFit.contain,
+                                ),
+                              ],
                             ),
-                            Image.asset(
-                              'assets/images/flame_3d.png',
-                              height: 160,
-                              fit: BoxFit.contain,
+                            const SizedBox(height: 20),
+                            const Text(
+                              'Appuie sur la flamme pour lancer le mode Focus',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontFamily: 'Inter',
+                                fontWeight: FontWeight.w500,
+                                fontSize: 13,
+                                color: Color(0x80BBBBBB),
+                              ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 20),
-                        const Text(
-                          'Appuie sur la flamme pour lancer le mode Focus',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontFamily: 'Inter',
-                            fontWeight: FontWeight.w500,
-                            fontSize: 13,
-                            color: Color(0x80BBBBBB),
+                      ),
+                      if (Platform.isIOS) ...[
+                        const SizedBox(height: 32),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 22),
+                          child: HoldButton(
+                            label: 'Ouvrir une session',
+                            onComplete: () => context.go('/network-select'),
                           ),
                         ),
                       ],
-                    ),
+                    ],
                   ),
                 ),
               ),
@@ -203,8 +219,7 @@ class _FocusDashboard extends StatelessWidget {
               SparkBottomNav(
                 currentIndex: 0,
                 onTap: (i) {
-                  if (i == 1) context.go('/edit');
-                  if (i == 2) context.go('/profil');
+                  if (i == 1) context.go('/profil');
                 },
               ),
             ],

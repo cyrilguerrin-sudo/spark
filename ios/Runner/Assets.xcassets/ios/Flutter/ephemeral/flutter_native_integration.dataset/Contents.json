@@ -1,0 +1,12 @@
+{
+  "data" : [
+    {
+      "filename" : "flutter_native_integration.env",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

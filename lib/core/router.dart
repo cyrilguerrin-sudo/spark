@@ -3,7 +3,6 @@ import '../screens/splash_screen.dart';
 import '../screens/permissions_screen.dart';
 import '../screens/onboarding_screen.dart';
 import '../screens/dashboard_screen.dart';
-import '../screens/edit_screen.dart';
 import '../screens/profil_screen.dart';
 import '../screens/intention_screen.dart';
 import '../screens/session_timer_screen.dart';
@@ -11,6 +10,7 @@ import '../screens/session_end_screen.dart';
 import '../screens/redirect_screen.dart';
 import '../screens/focus_config_screen.dart';
 import '../screens/focus_blocked_screen.dart';
+import '../screens/network_selection_screen.dart';
 
 final appRouter = GoRouter(
   initialLocation: '/',
@@ -34,11 +34,6 @@ final appRouter = GoRouter(
       path: '/dashboard',
       name: 'dashboard',
       builder: (context, state) => const DashboardScreen(),
-    ),
-    GoRoute(
-      path: '/edit',
-      name: 'edit',
-      builder: (context, state) => const EditScreen(),
     ),
     GoRoute(
       path: '/profil',
@@ -101,6 +96,11 @@ final appRouter = GoRouter(
         final extra = state.extra as Map<String, dynamic>? ?? {};
         return FocusBlockedScreen(networkId: extra['networkId'] as String? ?? '');
       },
+    ),
+    GoRoute(
+      path: '/network-select',
+      name: 'networkSelect',
+      builder: (context, state) => const NetworkSelectionScreen(),
     ),
   ],
 );

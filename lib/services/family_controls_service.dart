@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -85,13 +86,46 @@ class FamilyControlsService {
 
   // ── App monitoring ──────────────────────────────────────────────────────────
 
-  /// Presents the native FamilyActivityPicker (system UI) so the user can
-  /// select which apps Spark should monitor.
-  /// The resulting FamilyActivitySelection is saved to the App Group by Swift.
-  static Future<void> setMonitoredNetworks() async {
+  /// Presents a FamilyActivityPicker titled for [network] ("instagram"|"tiktok"|"youtube").
+  /// The selected token is stored individually (KEY_TOKEN_X) and the combined shield
+  /// is applied immediately. Returns when the picker is dismissed.
+  static Future<void> setMonitoredNetwork(String network) async {
     try {
-      await _channel.invokeMethod('setMonitoredNetworks');
-    } on PlatformException catch (_) {}
+      debugPrint('[Spark] setMonitoredNetwork($network) → invoking channel');
+      await _channel.invokeMethod('setMonitoredNetwork', {'network': network});
+      debugPrint('[Spark] setMonitoredNetwork($network) → channel returned OK');
+    } catch (e) {
+      debugPrint('[Spark] setMonitoredNetwork($network) → ERROR: $e');
+    }
+  }
+
+  /// Returns the list of network IDs that have a stored token
+  /// (e.g. ["instagram", "youtube"] if those two were set up).
+  static Future<List<String>> getConfiguredNetworks() async {
+    try {
+      final result = await _channel.invokeMethod<List>('getConfiguredNetworks');
+      return result?.cast<String>() ?? [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  // ── App monitoring info ─────────────────────────────────────────────────────
+
+  /// Returns the total number of applicationTokens across all configured networks.
+  static Future<int> getMonitoredAppsCount() async {
+    try {
+      return await _channel.invokeMethod<int>('getMonitoredAppsCount') ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// Opens iOS Screen Time settings natively via Swift (bypasses url_launcher).
+  static Future<void> openScreenTimeSettings() async {
+    try {
+      await _channel.invokeMethod('openScreenTimeSettings');
+    } catch (_) {}
   }
 
   // ── Session lifecycle ───────────────────────────────────────────────────────

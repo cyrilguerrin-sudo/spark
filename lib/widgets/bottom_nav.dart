@@ -33,14 +33,9 @@ class SparkBottomNav extends StatelessWidget {
               onTap: () => onTap(0),
             ),
             _NavItem(
-              icon: Icons.edit,
+              icon: Icons.person,
               active: currentIndex == 1,
               onTap: () => onTap(1),
-            ),
-            _NavItem(
-              icon: Icons.person,
-              active: currentIndex == 2,
-              onTap: () => onTap(2),
             ),
           ],
         ),

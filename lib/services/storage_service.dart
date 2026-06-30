@@ -77,4 +77,12 @@ class StorageService {
     await user.put('lastName', lastName);
     await user.put('email', email);
   }
+
+  // ── iOS FamilyControls ──────────────────────────────────────────────────────
+
+  static bool get familyControlsAuthorized =>
+      user.get('familyControlsAuthorized', defaultValue: false) as bool;
+
+  static Future<void> setFamilyControlsAuthorized(bool value) =>
+      user.put('familyControlsAuthorized', value);
 }

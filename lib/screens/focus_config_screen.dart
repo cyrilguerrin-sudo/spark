@@ -56,7 +56,7 @@ class _FocusConfigScreenState extends ConsumerState<FocusConfigScreen> {
                   color: AppColors.textPrimary,
                   size: 22,
                 ),
-                onPressed: () => context.pop(),
+                onPressed: () => context.go('/dashboard'),
               ),
             ),
 

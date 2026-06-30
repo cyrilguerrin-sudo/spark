@@ -1,0 +1,12 @@
+{
+  "data" : [
+    {
+      "filename" : "flutter_lldbinit",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

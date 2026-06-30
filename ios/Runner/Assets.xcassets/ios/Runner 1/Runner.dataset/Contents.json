@@ -1,0 +1,12 @@
+{
+  "data" : [
+    {
+      "filename" : "Runner.entitlements",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

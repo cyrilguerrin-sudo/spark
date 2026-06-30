@@ -4,11 +4,41 @@ import FamilyControls
 import DeviceActivity
 import ManagedSettings
 import SwiftUI
+import Combine
+import os
 
-private let kAppGroup = "group.com.cyrilguerrin.spark"
-private let kChannel  = "com.example.spark/familycontrols"
+private let kChannel = "com.example.spark/familycontrols"
+private let logger   = Logger(subsystem: "com.cyrilguerrin.spark", category: "FamilyControls")
 
-// Shared UserDefaults keys — must stay in sync with all Swift extensions
+// File-based App Group storage — replaces UserDefaults(suiteName:) which triggers
+// kCFPreferencesAnyUser in ManagedSettings extension processes, causing cfprefsd
+// detachment and silent data loss on iOS 16+.
+private enum AppGroupStore {
+    static var fileURL: URL? {
+        FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: "group.com.cyrilguerrin.spark")?
+            .appendingPathComponent("spark_prefs.plist")
+    }
+    static func read() -> [String: Any] {
+        guard let url = fileURL,
+              let data = try? Data(contentsOf: url),
+              let obj  = try? PropertyListSerialization.propertyList(from: data, format: nil),
+              let dict = obj as? [String: Any] else { return [:] }
+        return dict
+    }
+    static func write(_ dict: [String: Any]) {
+        guard let url = fileURL,
+              let data = try? PropertyListSerialization.data(fromPropertyList: dict, format: .binary, options: 0)
+        else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+    static func set(_ key: String, _ value: Any?) {
+        var d = read(); if let v = value { d[key] = v } else { d.removeValue(forKey: key) }; write(d)
+    }
+    static func remove(_ key: String) { set(key, nil) }
+}
+
+// Shared storage keys — must stay in sync with all Swift extensions
 enum UDKey {
     static let sessionEndTime     = "KEY_SESSION_END_TIME"
     static let sessionNetworkId   = "KEY_SESSION_NETWORK_ID"
@@ -24,8 +54,12 @@ enum UDKey {
     static let sessionHistory     = "KEY_SESSION_HISTORY"
     // Written by DeviceActivityMonitor extension, consumed here on next foreground
     static let sessionCancelledPending = "KEY_SESSION_CANCELLED_PENDING"
-    // Written by SparkAppIntent (AppIntentsExtension), consumed here on next foreground
+    // Written by SparkAppIntent (legacy, kept for migration of stale data)
     static let pendingNetworkInterception = "KEY_PENDING_NETWORK_INTERCEPTION"
+    // Per-network tokens (3-picker setup)
+    static let tokenInstagram       = "KEY_TOKEN_INSTAGRAM"
+    static let tokenTiktok          = "KEY_TOKEN_TIKTOK"
+    static let tokenYoutube         = "KEY_TOKEN_YOUTUBE"
 }
 
 @main
@@ -35,9 +69,8 @@ enum UDKey {
     private var channel: FlutterMethodChannel?
     private let store = ManagedSettingsStore()
     // Kept alive while FamilyActivityPicker is on screen
-    private var pickerSession: PickerSession?
+    private var pickerContainer: PickerContainer?
 
-    var sharedUD: UserDefaults? { UserDefaults(suiteName: kAppGroup) }
 
     // MARK: - Application lifecycle
 
@@ -46,6 +79,13 @@ enum UDKey {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
         GeneratedPluginRegistrant.register(with: self)
+
+        // Diagnose App Group file container accessibility.
+        if AppGroupStore.fileURL == nil {
+            logger.error("[AppDelegate] CRITICAL — App Group container URL nil. group.com.cyrilguerrin.spark not accessible.")
+        } else {
+            logger.debug("[AppDelegate] App Group file container OK: \(AppGroupStore.fileURL!.path, privacy: .public)")
+        }
 
         guard let controller = window?.rootViewController as? FlutterViewController else {
             return super.application(application, didFinishLaunchingWithOptions: launchOptions)
@@ -62,8 +102,18 @@ enum UDKey {
     // Check for events written by extensions while the main app was suspended
     override func applicationDidBecomeActive(_ application: UIApplication) {
         super.applicationDidBecomeActive(application)
+        logSharedUDState()
         handleSessionResumeIfNeeded()
         dispatchPendingExtensionEvents()
+    }
+
+    private func logSharedUDState() {
+        let s       = AppGroupStore.read()
+        let tokens  = s[UDKey.monitoredTokens] as? Data
+        let sessEnd = s[UDKey.sessionEndTime]  as? Double ?? 0.0
+        let focus   = s[UDKey.focusActive]     as? Bool   ?? false
+        let tokenDesc = tokens.map { "\($0.count)B" } ?? "nil"
+        logger.debug("[AppDelegate] AppGroup state — monitoredTokens:\(tokenDesc, privacy: .public) sessionEnd:\(sessEnd) focusActive:\(focus)")
     }
 
     // Spark is going to background (user returned to their session app or switched away).
@@ -104,12 +154,15 @@ enum UDKey {
         switch call.method {
         case "requestAuthorization":  requestAuthorization(result: result)
         case "checkAuthorization":    checkAuthorization(result: result)
-        case "setMonitoredNetworks":  setMonitoredNetworks(call: call, result: result)
-        case "setSessionEndTime":     setSessionEndTime(call: call, result: result)
-        case "clearSessionEndTime":   clearSessionEndTime(result: result)
-        case "setFocusMode":          setFocusMode(call: call, result: result)
-        case "getSessionHistory":     getSessionHistory(result: result)
-        default:                      result(FlutterMethodNotImplemented)
+        case "setMonitoredNetwork":   setMonitoredNetwork(call: call, result: result)
+        case "getConfiguredNetworks": getConfiguredNetworks(result: result)
+        case "setSessionEndTime":       setSessionEndTime(call: call, result: result)
+        case "clearSessionEndTime":     clearSessionEndTime(result: result)
+        case "setFocusMode":            setFocusMode(call: call, result: result)
+        case "getSessionHistory":       getSessionHistory(result: result)
+        case "getMonitoredAppsCount":   getMonitoredAppsCount(result: result)
+        case "openScreenTimeSettings":  openScreenTimeSettings(result: result)
+        default:                        result(FlutterMethodNotImplemented)
         }
     }
 
@@ -140,14 +193,21 @@ enum UDKey {
         result(AuthorizationCenter.shared.authorizationStatus == .approved)
     }
 
-    // MARK: - setMonitoredNetworks
-    // If Flutter sends pre-encoded FamilyActivitySelection bytes, persist them directly.
-    // Otherwise present the native FamilyActivityPicker so the user can select apps.
-    private func setMonitoredNetworks(call: FlutterMethodCall, result: @escaping FlutterResult) {
-        if let args = call.arguments as? [String: Any],
-           let bytes = (args["tokensData"] as? FlutterStandardTypedData)?.data {
-            sharedUD?.set(bytes, forKey: UDKey.monitoredTokens)
-            result(true)
+    // MARK: - setMonitoredNetwork
+    // Presents FamilyActivityPicker for one specific network (instagram|tiktok|youtube)
+    // using the official .familyActivityPicker modifier + Combine sink pattern.
+    // The system updates the selection binding while XPC is still alive, so
+    // PropertyListEncoder (which requires valid Codable state) works reliably.
+    private func setMonitoredNetwork(call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard #available(iOS 16.0, *) else { result(false); return }
+
+        guard let args    = call.arguments as? [String: Any],
+              let network = args["network"] as? String,
+              ["instagram", "tiktok", "youtube"].contains(network)
+        else {
+            result(FlutterError(code: "INVALID_ARGS",
+                                message: "Requires network: instagram|tiktok|youtube",
+                                details: nil))
             return
         }
 
@@ -156,31 +216,88 @@ enum UDKey {
             return
         }
 
-        let session = PickerSession()
-        self.pickerSession = session
-
-        var dismissAction: (() -> Void)?
-        let model = session.model
-
-        let pickerView = FamilyPickerView(model: model) {
-            dismissAction?()
+        let tokenKey: String
+        switch network {
+        case "instagram": tokenKey = UDKey.tokenInstagram
+        case "tiktok":    tokenKey = UDKey.tokenTiktok
+        default:          tokenKey = UDKey.tokenYoutube
         }
 
-        let vc = UIHostingController(rootView: pickerView)
-        vc.modalPresentationStyle = .formSheet
-        session.hostingVC = vc
+        let model     = PickerModel()
+        let container = PickerContainer(model: model)
+        self.pickerContainer = container
 
-        dismissAction = { [weak vc, weak self] in
-            if let data = try? PropertyListEncoder().encode(model.selection) {
-                self?.sharedUD?.set(data, forKey: UDKey.monitoredTokens)
+        // Combine sink: fires when the system writes to the binding — XPC still alive.
+        // dropFirst() skips the initial empty FamilyActivitySelection().
+        model.$activitySelection
+            .dropFirst()
+            .sink { selection in
+                logger.debug("[Spark] Combine sink: \(selection.applicationTokens.count) tokens for \(network, privacy: .public)")
+                if let data = try? PropertyListEncoder().encode(selection) {
+                    AppGroupStore.set(tokenKey, data)
+                    logger.debug("[Spark] AppGroupStore write OK — key=\(tokenKey, privacy: .public) \(data.count)B")
+                } else {
+                    logger.error("[Spark] PropertyListEncoder FAILED for \(network, privacy: .public)")
+                }
             }
-            vc?.dismiss(animated: true) {
-                self?.pickerSession = nil
-                result(true)
-            }
+            .store(in: &model.cancellables)
+
+        let containerView = PickerContainerView(model: model) { [weak self, weak rootVC] in
+            logger.debug("[Spark] picker dismissed for \(network, privacy: .public)")
+            self?.rebuildAndApplyMonitoredTokens()
+            result(true)
+            self?.pickerContainer = nil
+            rootVC?.presentedViewController?.dismiss(animated: false)
         }
 
-        rootVC.present(vc, animated: true)
+        let vc = UIHostingController(rootView: containerView)
+        vc.view.backgroundColor = .clear
+        vc.modalPresentationStyle = .overFullScreen
+        container.hostingVC = vc
+        rootVC.present(vc, animated: false)
+    }
+
+    // Unions all per-network tokens, writes KEY_MONITORED_TOKENS for extensions,
+    // and immediately applies the shield.
+    private func rebuildAndApplyMonitoredTokens() {
+        guard #available(iOS 16.0, *) else { return }
+        let d = AppGroupStore.read()
+        var allTokens = Set<ApplicationToken>()
+
+        for key in [UDKey.tokenInstagram, UDKey.tokenTiktok, UDKey.tokenYoutube] {
+            guard let data = d[key] as? Data,
+                  let sel  = decodePerNetworkSelection(from: data)
+            else { continue }
+            allTokens.formUnion(sel.applicationTokens)
+        }
+
+        guard !allTokens.isEmpty else {
+            store.shield.applications = nil
+            AppGroupStore.remove(UDKey.monitoredTokens)
+            logger.debug("[AppDelegate] rebuildAndApplyMonitoredTokens: no tokens configured")
+            return
+        }
+
+        var combined = FamilyActivitySelection()
+        combined.applicationTokens = allTokens
+        if let data = try? NSKeyedArchiver.archivedData(withRootObject: combined,
+                                                        requiringSecureCoding: true) {
+            AppGroupStore.set(UDKey.monitoredTokens, data)
+        }
+
+        store.shield.applications = allTokens
+        logger.debug("[AppDelegate] rebuildAndApplyMonitoredTokens: shielding \(allTokens.count) apps")
+    }
+
+    // MARK: - getConfiguredNetworks
+
+    private func getConfiguredNetworks(result: FlutterResult) {
+        let d = AppGroupStore.read()
+        var networks: [String] = []
+        if d[UDKey.tokenInstagram] != nil { networks.append("instagram") }
+        if d[UDKey.tokenTiktok]    != nil { networks.append("tiktok") }
+        if d[UDKey.tokenYoutube]   != nil { networks.append("youtube") }
+        result(networks)
     }
 
     // MARK: - setSessionEndTime
@@ -197,15 +314,16 @@ enum UDKey {
             return
         }
 
-        let ud = sharedUD
-        ud?.set(endTime,   forKey: UDKey.sessionEndTime)
-        ud?.set(networkId, forKey: UDKey.sessionNetworkId)
-        ud?.set(startTime, forKey: UDKey.sessionStartTime)
-        ud?.set(0.0,       forKey: UDKey.sessionPausedAt)
-        ud?.set(0.0,       forKey: UDKey.sessionRemainingMs)
+        var d = AppGroupStore.read()
+        d[UDKey.sessionEndTime]     = endTime
+        d[UDKey.sessionNetworkId]   = networkId
+        d[UDKey.sessionStartTime]   = startTime
+        d[UDKey.sessionPausedAt]    = 0.0
+        d[UDKey.sessionRemainingMs] = 0.0
+        AppGroupStore.write(d)
 
-        // Unshield so the user can enter the app
-        store.shield.applications = nil
+        // Lift shield selectively for the session's network only
+        liftShieldForNetwork(networkId: networkId)
 
         // Arm the DeviceActivity schedule so the monitor extension fires when time is up
         scheduleSessionTimer(endTime: endTime)
@@ -213,15 +331,44 @@ enum UDKey {
         result(true)
     }
 
+    // Removes the shield on the session's network token while keeping other monitored
+    // apps shielded. Falls back to lifting all shields if tokens can't be resolved.
+    private func liftShieldForNetwork(networkId: String) {
+        let d = AppGroupStore.read()
+        let tokenKey: String
+        switch networkId {
+        case "instagram": tokenKey = UDKey.tokenInstagram
+        case "tiktok":    tokenKey = UDKey.tokenTiktok
+        case "youtube":   tokenKey = UDKey.tokenYoutube
+        default:          store.shield.applications = nil; return
+        }
+
+        guard let sessionData = d[tokenKey] as? Data,
+              let sessionSel  = decodePerNetworkSelection(from: sessionData)
+        else { store.shield.applications = nil; return }
+
+        let sessionTokens = sessionSel.applicationTokens
+
+        guard let allData = d[UDKey.monitoredTokens] as? Data,
+              let allSel  = decodeSelection(from: allData),
+              !allSel.applicationTokens.isEmpty
+        else { store.shield.applications = nil; return }
+
+        let remaining = allSel.applicationTokens.subtracting(sessionTokens)
+        store.shield.applications = remaining.isEmpty ? nil : remaining
+        logger.debug("[AppDelegate] liftShieldForNetwork: \(networkId, privacy: .public) session started, \(remaining.count) apps still shielded")
+    }
+
     // MARK: - clearSessionEndTime
 
     private func clearSessionEndTime(result: FlutterResult) {
-        let ud = sharedUD
-        ud?.set(0.0, forKey: UDKey.sessionEndTime)
-        ud?.set(0.0, forKey: UDKey.sessionStartTime)
-        ud?.set(0.0, forKey: UDKey.sessionPausedAt)
-        ud?.set(0.0, forKey: UDKey.sessionRemainingMs)
-        ud?.removeObject(forKey: UDKey.sessionNetworkId)
+        var d = AppGroupStore.read()
+        d[UDKey.sessionEndTime]     = 0.0
+        d[UDKey.sessionStartTime]   = 0.0
+        d[UDKey.sessionPausedAt]    = 0.0
+        d[UDKey.sessionRemainingMs] = 0.0
+        d.removeValue(forKey: UDKey.sessionNetworkId)
+        AppGroupStore.write(d)
 
         DeviceActivityCenter().stopMonitoring([DeviceActivityName("spark.session")])
         applyMonitoredShield()
@@ -239,24 +386,26 @@ enum UDKey {
             return
         }
 
-        let ud = sharedUD
-        ud?.set(active, forKey: UDKey.focusActive)
+        var d = AppGroupStore.read()
+        d[UDKey.focusActive] = active
 
         if active {
-            // Store the user's focus goal for the Shield subtitle
             if let goal = args["goal"] as? String {
-                ud?.set(goal, forKey: UDKey.focusGoal)
+                d[UDKey.focusGoal] = goal
             }
-            // Prefer explicitly provided tokens, fall back to monitored tokens
             let tokenBytes = (args["tokensData"] as? FlutterStandardTypedData)?.data
-                ?? ud?.data(forKey: UDKey.monitoredTokens)
+                ?? d[UDKey.monitoredTokens] as? Data
             if let data = tokenBytes {
-                ud?.set(data, forKey: UDKey.focusTokens)
+                d[UDKey.focusTokens] = data
+                AppGroupStore.write(d)
                 shieldApps(from: data)
+            } else {
+                AppGroupStore.write(d)
             }
         } else {
-            ud?.removeObject(forKey: UDKey.focusTokens)
-            ud?.removeObject(forKey: UDKey.focusGoal)
+            d.removeValue(forKey: UDKey.focusTokens)
+            d.removeValue(forKey: UDKey.focusGoal)
+            AppGroupStore.write(d)
             store.shield.applications = nil
         }
 
@@ -266,7 +415,50 @@ enum UDKey {
     // MARK: - getSessionHistory
 
     private func getSessionHistory(result: FlutterResult) {
-        result(sharedUD?.string(forKey: UDKey.sessionHistory) ?? "[]")
+        result(AppGroupStore.read()[UDKey.sessionHistory] as? String ?? "[]")
+    }
+
+    // MARK: - FamilyActivitySelection decode helpers
+
+    // Per-network tokens are encoded with PropertyListEncoder (new path).
+    // Falls back to NSKeyedUnarchiver for any legacy data from the old encoding.
+    private func decodePerNetworkSelection(from data: Data) -> FamilyActivitySelection? {
+        if let sel = try? PropertyListDecoder().decode(FamilyActivitySelection.self, from: data) {
+            return sel
+        }
+        return decodeSelection(from: data)
+    }
+
+    // NSKeyedUnarchiver decoder — used for KEY_MONITORED_TOKENS (combined set read by extensions)
+    // and as fallback for legacy per-network tokens.
+    private func decodeSelection(from data: Data) -> FamilyActivitySelection? {
+        guard let unarchiver = try? NSKeyedUnarchiver(forReadingFrom: data) else { return nil }
+        unarchiver.requiresSecureCoding = false
+        let obj = unarchiver.decodeObject(forKey: NSKeyedArchiveRootObjectKey)
+        unarchiver.finishDecoding()
+        return obj as? FamilyActivitySelection
+    }
+
+    // MARK: - getMonitoredAppsCount
+
+    private func getMonitoredAppsCount(result: FlutterResult) {
+        guard let data = AppGroupStore.read()[UDKey.monitoredTokens] as? Data,
+              let selection = decodeSelection(from: data)
+        else { result(0); return }
+        result(selection.applicationTokens.count)
+    }
+
+    // MARK: - openScreenTimeSettings
+
+    private func openScreenTimeSettings(result: @escaping FlutterResult) {
+        // Try the Screen Time deep link first; fall back to the app's own Settings page.
+        if let url = URL(string: "App-Prefs:SCREENTIME"), UIApplication.shared.canOpenURL(url) {
+            UIApplication.shared.open(url) { _ in result(true) }
+        } else if let url = URL(string: UIApplication.openSettingsURLString) {
+            UIApplication.shared.open(url) { _ in result(true) }
+        } else {
+            result(true)
+        }
     }
 
     // MARK: - Pause / resume helpers
@@ -274,17 +466,16 @@ enum UDKey {
     // Called from applicationWillResignActive.
     // Writes KEY_SESSION_PAUSED_AT and KEY_SESSION_REMAINING_MS, then starts spark.pause45.
     private func handleSessionPauseIfNeeded() {
-        guard let ud = sharedUD else { return }
-        let endTime = ud.double(forKey: UDKey.sessionEndTime)
+        var d = AppGroupStore.read()
+        let endTime = d[UDKey.sessionEndTime] as? Double ?? 0.0
         let now = Date().timeIntervalSince1970
-        // Only act if there's an active, unexpired session
         guard endTime > 0, now < endTime else { return }
-        // Don't double-pause
-        guard ud.double(forKey: UDKey.sessionPausedAt) == 0 else { return }
+        guard (d[UDKey.sessionPausedAt] as? Double ?? 0.0) == 0 else { return }
 
         let remainingMs = (endTime - now) * 1000
-        ud.set(now,         forKey: UDKey.sessionPausedAt)
-        ud.set(remainingMs, forKey: UDKey.sessionRemainingMs)
+        d[UDKey.sessionPausedAt]    = now
+        d[UDKey.sessionRemainingMs] = remainingMs
+        AppGroupStore.write(d)
 
         schedulePause45()
     }
@@ -293,21 +484,21 @@ enum UDKey {
     // If the user returned within 45s, cancels the watchdog and reschedules the session
     // timer with the remaining time. If 45s already elapsed silentReset will have fired.
     private func handleSessionResumeIfNeeded() {
-        guard let ud = sharedUD else { return }
-        let pausedAt     = ud.double(forKey: UDKey.sessionPausedAt)
-        let remainingMs  = ud.double(forKey: UDKey.sessionRemainingMs)
-        let now          = Date().timeIntervalSince1970
+        var d = AppGroupStore.read()
+        let pausedAt    = d[UDKey.sessionPausedAt]    as? Double ?? 0.0
+        let remainingMs = d[UDKey.sessionRemainingMs] as? Double ?? 0.0
+        let now         = Date().timeIntervalSince1970
 
         guard pausedAt > 0, remainingMs > 0 else { return }
 
         let elapsed = now - pausedAt
 
         if elapsed < 45 {
-            // User is back in time — resume session with remaining duration
             DeviceActivityCenter().stopMonitoring([DeviceActivityName("spark.pause45")])
-            ud.set(0.0, forKey: UDKey.sessionPausedAt)
             let newEndTime = now + (remainingMs / 1000)
-            ud.set(newEndTime, forKey: UDKey.sessionEndTime)
+            d[UDKey.sessionPausedAt]  = 0.0
+            d[UDKey.sessionEndTime]   = newEndTime
+            AppGroupStore.write(d)
             scheduleSessionTimer(endTime: newEndTime)
         }
         // If elapsed >= 45s the DeviceActivityMonitorExtension silentReset has already
@@ -332,15 +523,23 @@ enum UDKey {
     // MARK: - Pending extension event dispatch
 
     private func dispatchPendingExtensionEvents() {
-        guard let ud = sharedUD else { return }
-        if ud.bool(forKey: UDKey.sessionCancelledPending) {
-            ud.removeObject(forKey: UDKey.sessionCancelledPending)
+        var d = AppGroupStore.read()
+        var dirty = false
+
+        if d[UDKey.sessionCancelledPending] as? Bool == true {
+            d.removeValue(forKey: UDKey.sessionCancelledPending)
+            dirty = true
             channel?.invokeMethod("onSessionCancelled", arguments: nil)
         }
-        if let networkId = ud.string(forKey: UDKey.pendingNetworkInterception) {
-            ud.removeObject(forKey: UDKey.pendingNetworkInterception)
+
+        // Legacy SparkAppIntent path — consume any stale data from before this update
+        if let networkId = d[UDKey.pendingNetworkInterception] as? String {
+            d.removeValue(forKey: UDKey.pendingNetworkInterception)
+            dirty = true
             channel?.invokeMethod("onAppIntercepted", arguments: ["networkId": networkId])
         }
+
+        if dirty { AppGroupStore.write(d) }
     }
 
     // MARK: - DeviceActivity helpers
@@ -374,48 +573,54 @@ enum UDKey {
     }
 
     private func applyMonitoredShield() {
-        guard let data = sharedUD?.data(forKey: UDKey.monitoredTokens) else { return }
+        guard let data = AppGroupStore.read()[UDKey.monitoredTokens] as? Data else { return }
         shieldApps(from: data)
     }
 
     func shieldApps(from data: Data) {
-        guard let selection = try? PropertyListDecoder().decode(FamilyActivitySelection.self, from: data)
-        else { return }
+        guard let selection = decodeSelection(from: data) else {
+            logger.error("[AppDelegate] ERROR — FamilyActivitySelection decode failed (\(data.count) bytes)")
+            return
+        }
         let tokens = selection.applicationTokens
+        logger.debug("[AppDelegate] shieldApps: \(tokens.count) app tokens")
         store.shield.applications = tokens.isEmpty ? nil : tokens
     }
 }
 
-// MARK: - FamilyActivityPicker helpers
+// MARK: - FamilyActivityPicker helpers (official binding pattern)
 
-// Keeps the picker model alive while the UIHostingController is on screen
-@available(iOS 15.0, *)
-private class PickerSession {
-    let model = FamilyPickerModel()
+@available(iOS 16.0, *)
+private class PickerModel: ObservableObject {
+    @Published var activitySelection = FamilyActivitySelection()
+    var cancellables = Set<AnyCancellable>()
+}
+
+@available(iOS 16.0, *)
+private class PickerContainer {
+    let model: PickerModel
     weak var hostingVC: UIViewController?
+    init(model: PickerModel) { self.model = model }
 }
 
-@available(iOS 15.0, *)
-private class FamilyPickerModel: ObservableObject {
-    @Published var selection = FamilyActivitySelection()
-}
-
-@available(iOS 15.0, *)
-private struct FamilyPickerView: View {
-    @ObservedObject var model: FamilyPickerModel
-    let onDone: () -> Void
+// Transparent host view that presents the system picker via .familyActivityPicker modifier.
+// Using the modifier (not FamilyActivityPicker as a child view) lets the system manage
+// the XPC lifecycle: the selection binding is updated while XPC is still alive, so
+// PropertyListEncoder succeeds in the Combine sink.
+@available(iOS 16.0, *)
+private struct PickerContainerView: View {
+    @ObservedObject var model: PickerModel
+    @State private var isPresented = false
+    let onDismiss: () -> Void
 
     var body: some View {
-        NavigationView {
-            FamilyActivityPicker(selection: $model.selection)
-                .navigationTitle("Apps à surveiller")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("OK", action: onDone)
-                    }
-                }
-        }
-        .navigationViewStyle(.stack)
+        Color.clear
+            .familyActivityPicker(isPresented: $isPresented, selection: $model.activitySelection)
+            .onAppear {
+                DispatchQueue.main.async { isPresented = true }
+            }
+            .onChange(of: isPresented) { presented in
+                if !presented { onDismiss() }
+            }
     }
 }
