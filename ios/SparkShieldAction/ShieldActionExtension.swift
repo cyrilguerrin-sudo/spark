@@ -156,6 +156,9 @@ class ShieldActionExtension: ShieldActionDelegate {
     // MARK: - FamilyActivitySelection decode helper
 
     private func decodeSelection(from data: Data) -> FamilyActivitySelection? {
+        if let sel = try? PropertyListDecoder().decode(FamilyActivitySelection.self, from: data) {
+            return sel
+        }
         guard let unarchiver = try? NSKeyedUnarchiver(forReadingFrom: data) else { return nil }
         unarchiver.requiresSecureCoding = false
         let obj = unarchiver.decodeObject(forKey: NSKeyedArchiveRootObjectKey)

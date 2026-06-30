@@ -280,9 +280,14 @@ enum UDKey {
 
         var combined = FamilyActivitySelection()
         combined.applicationTokens = allTokens
-        if let data = try? NSKeyedArchiver.archivedData(withRootObject: combined,
-                                                        requiringSecureCoding: true) {
+        // PropertyListEncoder: consistent with per-network tokens (also Codable path).
+        // NSKeyedArchiver with requiringSecureCoding:true fails because FamilyActivitySelection
+        // doesn't publicly expose NSSecureCoding, and the try? would silently drop the write.
+        if let data = try? PropertyListEncoder().encode(combined) {
             AppGroupStore.set(UDKey.monitoredTokens, data)
+            logger.debug("[AppDelegate] rebuildAndApplyMonitoredTokens: KEY_MONITORED_TOKENS \(data.count)B")
+        } else {
+            logger.error("[AppDelegate] rebuildAndApplyMonitoredTokens: PropertyListEncoder FAILED for combined")
         }
 
         store.shield.applications = allTokens
@@ -331,32 +336,30 @@ enum UDKey {
         result(true)
     }
 
-    // Removes the shield on the session's network token while keeping other monitored
-    // apps shielded. Falls back to lifting all shields if tokens can't be resolved.
+    // Removes the shield only on the session's network; other monitored apps stay shielded.
+    // Reads each per-network token individually via decodePerNetworkSelection (same
+    // PropertyListDecoder path) instead of subtracting from the combined KEY_MONITORED_TOKENS.
+    // Cross-encoder subtraction (PropertyListDecoder vs NSKeyedUnarchiver) produces tokens
+    // that aren't Hashable-equal, so Set.subtracting() would silently remove nothing.
     private func liftShieldForNetwork(networkId: String) {
         let d = AppGroupStore.read()
-        let tokenKey: String
-        switch networkId {
-        case "instagram": tokenKey = UDKey.tokenInstagram
-        case "tiktok":    tokenKey = UDKey.tokenTiktok
-        case "youtube":   tokenKey = UDKey.tokenYoutube
-        default:          store.shield.applications = nil; return
+
+        var remainingTokens = Set<ApplicationToken>()
+        let allNetworks: [(String, String)] = [
+            ("instagram", UDKey.tokenInstagram),
+            ("tiktok",    UDKey.tokenTiktok),
+            ("youtube",   UDKey.tokenYoutube),
+        ]
+        for (net, key) in allNetworks {
+            guard net != networkId,
+                  let data = d[key] as? Data,
+                  let sel  = decodePerNetworkSelection(from: data)
+            else { continue }
+            remainingTokens.formUnion(sel.applicationTokens)
         }
 
-        guard let sessionData = d[tokenKey] as? Data,
-              let sessionSel  = decodePerNetworkSelection(from: sessionData)
-        else { store.shield.applications = nil; return }
-
-        let sessionTokens = sessionSel.applicationTokens
-
-        guard let allData = d[UDKey.monitoredTokens] as? Data,
-              let allSel  = decodeSelection(from: allData),
-              !allSel.applicationTokens.isEmpty
-        else { store.shield.applications = nil; return }
-
-        let remaining = allSel.applicationTokens.subtracting(sessionTokens)
-        store.shield.applications = remaining.isEmpty ? nil : remaining
-        logger.debug("[AppDelegate] liftShieldForNetwork: \(networkId, privacy: .public) session started, \(remaining.count) apps still shielded")
+        store.shield.applications = remainingTokens.isEmpty ? nil : remainingTokens
+        logger.debug("[AppDelegate] liftShieldForNetwork: \(networkId, privacy: .public) session started, \(remainingTokens.count) other apps still shielded")
     }
 
     // MARK: - clearSessionEndTime
@@ -443,7 +446,7 @@ enum UDKey {
 
     private func getMonitoredAppsCount(result: FlutterResult) {
         guard let data = AppGroupStore.read()[UDKey.monitoredTokens] as? Data,
-              let selection = decodeSelection(from: data)
+              let selection = decodePerNetworkSelection(from: data)
         else { result(0); return }
         result(selection.applicationTokens.count)
     }
@@ -578,7 +581,7 @@ enum UDKey {
     }
 
     func shieldApps(from data: Data) {
-        guard let selection = decodeSelection(from: data) else {
+        guard let selection = decodePerNetworkSelection(from: data) else {
             logger.error("[AppDelegate] ERROR — FamilyActivitySelection decode failed (\(data.count) bytes)")
             return
         }

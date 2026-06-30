@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -7,6 +8,7 @@ import '../models/session.dart';
 import '../providers/sessions_provider.dart';
 import '../providers/session_timer_provider.dart';
 import '../services/app_blocker_service.dart';
+import '../services/family_controls_service.dart';
 import '../widgets/time_slider.dart';
 
 class SessionTimerScreen extends ConsumerStatefulWidget {
@@ -30,6 +32,10 @@ class _SessionTimerScreenState extends ConsumerState<SessionTimerScreen> {
   int _selectedMinutes = 0;
 
   Future<void> _launchSession() async {
+    final endTimeMs = DateTime.now()
+        .add(Duration(minutes: _selectedMinutes))
+        .millisecondsSinceEpoch;
+
     final session = Session(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       networkId: widget.networkId,
@@ -42,16 +48,27 @@ class _SessionTimerScreenState extends ConsumerState<SessionTimerScreen> {
     ref.read(sessionsProvider.notifier).addSession(session);
     ref.read(sessionTimerProvider.notifier).start(widget.networkId, _selectedMinutes);
 
-    // Ouvre l'app sur le bon onglet, puis revient au dashboard Spark
-    final pkg = AppNetworks.androidPackages[widget.networkId];
-    if (pkg != null) {
-      await AppBlockerService.launchWithDeepLink(
-        deepLink: widget.deepLink,
-        packageName: pkg,
-      );
+    if (Platform.isIOS) {
+      // Sur iOS, c'est FamilyControls (channel familycontrols) qui gère le Shield.
+      // MonitorService utilise le channel Android-only et ne fait rien sur iOS.
+      await FamilyControlsService.setSessionEndTime(endTimeMs, widget.networkId);
+      if (mounted) {
+        context.go('/session-started', extra: {
+          'networkId': widget.networkId,
+          'durationMinutes': _selectedMinutes,
+        });
+      }
+    } else {
+      // Sur Android, ouvre l'app directement puis revient au dashboard.
+      final pkg = AppNetworks.androidPackages[widget.networkId];
+      if (pkg != null) {
+        await AppBlockerService.launchWithDeepLink(
+          deepLink: widget.deepLink,
+          packageName: pkg,
+        );
+      }
+      if (mounted) context.go('/dashboard');
     }
-
-    if (mounted) context.go('/dashboard');
   }
 
   @override

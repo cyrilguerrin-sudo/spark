@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../core/theme.dart';
@@ -41,18 +42,28 @@ class _SplashScreenState extends State<SplashScreen> {
     // Une interception a pushé une route par-dessus le splash → ne pas écraser
     if (!_isStillActive()) return;
 
-    final perms = await PermissionService.checkAll();
-    if (!mounted) return;
-
-    // Vérifier à nouveau après le gap async
-    if (!_isStillActive()) return;
-
     if (StorageService.isFirstLaunch) {
       context.go('/onboarding');
-    } else if (!perms.usageStats || !perms.overlay) {
-      context.go('/permissions');
+      return;
+    }
+
+    if (Platform.isIOS) {
+      // Sur iOS, les permissions Android ne s'appliquent pas.
+      // On vérifie uniquement si FamilyControls a déjà été autorisé.
+      if (StorageService.familyControlsAuthorized) {
+        context.go('/dashboard');
+      } else {
+        context.go('/permissions');
+      }
     } else {
-      context.go('/dashboard');
+      final perms = await PermissionService.checkAll();
+      if (!mounted) return;
+      if (!_isStillActive()) return;
+      if (!perms.usageStats || !perms.overlay) {
+        context.go('/permissions');
+      } else {
+        context.go('/dashboard');
+      }
     }
   }
 

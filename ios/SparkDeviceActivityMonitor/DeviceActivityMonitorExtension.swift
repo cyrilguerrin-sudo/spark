@@ -123,6 +123,11 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
     }
 
     private func decodeSelection(from data: Data) -> FamilyActivitySelection? {
+        // PropertyListDecoder first — KEY_MONITORED_TOKENS is now Codable-encoded.
+        if let sel = try? PropertyListDecoder().decode(FamilyActivitySelection.self, from: data) {
+            return sel
+        }
+        // Fallback for any legacy NSKeyedArchiver-encoded data on device.
         guard let unarchiver = try? NSKeyedUnarchiver(forReadingFrom: data) else { return nil }
         unarchiver.requiresSecureCoding = false
         let obj = unarchiver.decodeObject(forKey: NSKeyedArchiveRootObjectKey)

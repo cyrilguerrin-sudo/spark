@@ -11,6 +11,7 @@ import '../screens/redirect_screen.dart';
 import '../screens/focus_config_screen.dart';
 import '../screens/focus_blocked_screen.dart';
 import '../screens/network_selection_screen.dart';
+import '../screens/session_started_screen.dart';
 
 final appRouter = GoRouter(
   initialLocation: '/',
@@ -101,6 +102,18 @@ final appRouter = GoRouter(
       path: '/network-select',
       name: 'networkSelect',
       builder: (context, state) => const NetworkSelectionScreen(),
+    ),
+    // extra: {'networkId': String, 'durationMinutes': int}
+    GoRoute(
+      path: '/session-started',
+      name: 'sessionStarted',
+      builder: (context, state) {
+        final extra = state.extra as Map<String, dynamic>? ?? {};
+        return SessionStartedScreen(
+          networkId: extra['networkId'] as String? ?? '',
+          durationMinutes: extra['durationMinutes'] as int? ?? 0,
+        );
+      },
     ),
   ],
 );
