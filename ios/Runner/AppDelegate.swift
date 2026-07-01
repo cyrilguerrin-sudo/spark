@@ -104,6 +104,7 @@ enum UDKey {
         super.applicationDidBecomeActive(application)
         logSharedUDState()
         handleSessionResumeIfNeeded()
+        reapplyShieldIfSessionExpired()
         dispatchPendingExtensionEvents()
     }
 
@@ -158,6 +159,7 @@ enum UDKey {
         case "getConfiguredNetworks": getConfiguredNetworks(result: result)
         case "setSessionEndTime":       setSessionEndTime(call: call, result: result)
         case "clearSessionEndTime":     clearSessionEndTime(result: result)
+        case "reapplyShield":           reapplyShield(call: call, result: result)
         case "setFocusMode":            setFocusMode(call: call, result: result)
         case "getSessionHistory":       getSessionHistory(result: result)
         case "getMonitoredAppsCount":   getMonitoredAppsCount(result: result)
@@ -319,6 +321,8 @@ enum UDKey {
             return
         }
 
+        let durationMinutes = max(1, Int(round((endTime - startTime) / 60)))
+
         var d = AppGroupStore.read()
         d[UDKey.sessionEndTime]     = endTime
         d[UDKey.sessionNetworkId]   = networkId
@@ -327,11 +331,8 @@ enum UDKey {
         d[UDKey.sessionRemainingMs] = 0.0
         AppGroupStore.write(d)
 
-        // Lift shield selectively for the session's network only
         liftShieldForNetwork(networkId: networkId)
-
-        // Arm the DeviceActivity schedule so the monitor extension fires when time is up
-        scheduleSessionTimer(endTime: endTime)
+        scheduleSessionEvent(networkId: networkId, durationMinutes: durationMinutes)
 
         result(true)
     }
@@ -362,10 +363,16 @@ enum UDKey {
         logger.debug("[AppDelegate] liftShieldForNetwork: \(networkId, privacy: .public) session started, \(remainingTokens.count) other apps still shielded")
     }
 
-    // MARK: - clearSessionEndTime
+    // MARK: - reapplyShield
+    // Called by the Flutter 45-second inactivity timer when the user stayed in
+    // Spark too long during a session. networkId comes from Flutter (avoids
+    // reading AppGroupStore when we already know it).
+    private func reapplyShield(call: FlutterMethodCall, result: FlutterResult) {
+        let args      = call.arguments as? [String: Any] ?? [:]
+        let networkId = args["networkId"] as? String ?? ""
 
-    private func clearSessionEndTime(result: FlutterResult) {
         var d = AppGroupStore.read()
+        let storedNetworkId = networkId.isEmpty ? (d[UDKey.sessionNetworkId] as? String ?? "") : networkId
         d[UDKey.sessionEndTime]     = 0.0
         d[UDKey.sessionStartTime]   = 0.0
         d[UDKey.sessionPausedAt]    = 0.0
@@ -373,7 +380,30 @@ enum UDKey {
         d.removeValue(forKey: UDKey.sessionNetworkId)
         AppGroupStore.write(d)
 
-        DeviceActivityCenter().stopMonitoring([DeviceActivityName("spark.session")])
+        if !storedNetworkId.isEmpty {
+            DeviceActivityCenter().stopMonitoring([DeviceActivityName("spark.session.\(storedNetworkId)")])
+        }
+        applyMonitoredShield()
+        logger.debug("[AppDelegate] reapplyShield: networkId=\(storedNetworkId, privacy: .public) — inactivity timeout, shield re-applied")
+        result(true)
+    }
+
+    // MARK: - clearSessionEndTime
+
+    private func clearSessionEndTime(result: FlutterResult) {
+        var d = AppGroupStore.read()
+        let networkId = d[UDKey.sessionNetworkId] as? String ?? ""
+        d[UDKey.sessionEndTime]     = 0.0
+        d[UDKey.sessionStartTime]   = 0.0
+        d[UDKey.sessionPausedAt]    = 0.0
+        d[UDKey.sessionRemainingMs] = 0.0
+        d.removeValue(forKey: UDKey.sessionNetworkId)
+        AppGroupStore.write(d)
+
+        let center = DeviceActivityCenter()
+        if !networkId.isEmpty {
+            center.stopMonitoring([DeviceActivityName("spark.session.\(networkId)")])
+        }
         applyMonitoredShield()
 
         result(true)
@@ -484,8 +514,9 @@ enum UDKey {
     }
 
     // Called from applicationDidBecomeActive.
-    // If the user returned within 45s, cancels the watchdog and reschedules the session
-    // timer with the remaining time. If 45s already elapsed silentReset will have fired.
+    // If the user returned within 45s, cancels the watchdog and clears the paused state.
+    // The DeviceActivityEvent threshold tracking continues automatically — no reschedule needed.
+    // If 45s already elapsed silentReset will have fired.
     private func handleSessionResumeIfNeeded() {
         var d = AppGroupStore.read()
         let pausedAt    = d[UDKey.sessionPausedAt]    as? Double ?? 0.0
@@ -498,14 +529,35 @@ enum UDKey {
 
         if elapsed < 45 {
             DeviceActivityCenter().stopMonitoring([DeviceActivityName("spark.pause45")])
-            let newEndTime = now + (remainingMs / 1000)
             d[UDKey.sessionPausedAt]  = 0.0
-            d[UDKey.sessionEndTime]   = newEndTime
+            d[UDKey.sessionEndTime]   = now + (remainingMs / 1000)  // Approximate, for UI/fallback
             AppGroupStore.write(d)
-            scheduleSessionTimer(endTime: newEndTime)
+            // No DeviceActivity reschedule: DeviceActivityEvent threshold tracks actual usage
+            // and continues counting regardless of whether Spark was in the foreground.
         }
         // If elapsed >= 45s the DeviceActivityMonitorExtension silentReset has already
         // fired or is about to — don't interfere.
+    }
+
+    // Called from applicationDidBecomeActive.
+    // Fallback for when DeviceActivityMonitor.intervalDidEnd didn't fire (e.g. if
+    // startMonitoring threw during scheduleSessionTimer). Re-applies the shield and
+    // clears session state if the end time has already passed.
+    private func reapplyShieldIfSessionExpired() {
+        var d = AppGroupStore.read()
+        let endTime = d[UDKey.sessionEndTime] as? Double ?? 0.0
+        let now     = Date().timeIntervalSince1970
+        guard endTime > 0, now >= endTime else { return }
+
+        logger.debug("[AppDelegate] reapplyShieldIfSessionExpired: session expired at \(endTime), now=\(now) — re-applying shield")
+        applyMonitoredShield()
+
+        d[UDKey.sessionEndTime]   = 0.0
+        d[UDKey.sessionStartTime] = 0.0
+        d.removeValue(forKey: UDKey.sessionNetworkId)
+        AppGroupStore.write(d)
+
+        DeviceActivityCenter().stopMonitoring([DeviceActivityName("spark.session")])
     }
 
     private func schedulePause45() {
@@ -547,31 +599,56 @@ enum UDKey {
 
     // MARK: - DeviceActivity helpers
 
-    private func scheduleSessionTimer(endTime: Double) {
-        let center = DeviceActivityCenter()
-        let name   = DeviceActivityName("spark.session")
-        center.stopMonitoring([name])
+    // Schedules a DeviceActivityEvent for the session network.
+    // The event threshold = durationMinutes of ACTUAL USAGE of the monitored app,
+    // measured by iOS independently of wall-clock time and app state.
+    // eventDidReachThreshold() in DeviceActivityMonitorExtension fires when the threshold
+    // is reached, re-applying the shield even if Spark is closed.
+    private func scheduleSessionEvent(networkId: String, durationMinutes: Int) {
+        guard #available(iOS 16.0, *) else { return }
+        guard durationMinutes > 0 else { return }
 
-        let end = Date(timeIntervalSince1970: endTime)
-        guard end > Date() else { return }
+        let activityName = DeviceActivityName("spark.session.\(networkId)")
+        let center       = DeviceActivityCenter()
+        center.stopMonitoring([activityName])
 
-        let cal        = Calendar.current
-        let startComps = cal.dateComponents([.era, .year, .month, .day, .hour, .minute, .second],
-                                            from: Date().addingTimeInterval(1))
-        let endComps   = cal.dateComponents([.era, .year, .month, .day, .hour, .minute, .second],
-                                            from: end)
+        // Read the per-network token to know which apps to track usage for
+        let d = AppGroupStore.read()
+        let tokenKey: String
+        switch networkId {
+        case "instagram": tokenKey = UDKey.tokenInstagram
+        case "tiktok":    tokenKey = UDKey.tokenTiktok
+        default:          tokenKey = UDKey.tokenYoutube
+        }
 
+        guard let tokenData = d[tokenKey] as? Data,
+              let selection = decodePerNetworkSelection(from: tokenData),
+              !selection.applicationTokens.isEmpty
+        else {
+            logger.error("[AppDelegate] scheduleSessionEvent: no valid token for \(networkId, privacy: .public)")
+            return
+        }
+
+        // Wide day schedule — the event threshold fires the session end, not intervalEnd.
+        // Using hour/minute/second without date components makes it non-repeating for today
+        // when combined with repeats: false.
         let schedule = DeviceActivitySchedule(
-            intervalStart: startComps,
-            intervalEnd:   endComps,
+            intervalStart: DateComponents(hour: 0, minute: 0, second: 0),
+            intervalEnd:   DateComponents(hour: 23, minute: 59, second: 59),
             repeats:       false
         )
 
+        let event     = DeviceActivityEvent(
+            applications: selection.applicationTokens,
+            threshold:    DateComponents(minute: durationMinutes)
+        )
+        let eventName = DeviceActivityEvent.Name("spark.unlock.\(networkId)")
+
         do {
-            try center.startMonitoring(name, during: schedule)
+            try center.startMonitoring(activityName, during: schedule, events: [eventName: event])
+            logger.debug("[AppDelegate] scheduleSessionEvent: OK — \(networkId, privacy: .public) threshold=\(durationMinutes)min")
         } catch {
-            // Non-fatal — the DeviceActivityMonitor extension polls KEY_SESSION_END_TIME
-            // independently and will still reblock when the time comes.
+            logger.error("[AppDelegate] scheduleSessionEvent: startMonitoring FAILED — \(error.localizedDescription, privacy: .public)")
         }
     }
 

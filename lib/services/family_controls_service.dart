@@ -156,6 +156,15 @@ class FamilyControlsService {
     } on PlatformException catch (_) {}
   }
 
+  /// Called by the Flutter 45-second inactivity timer when the user stayed in
+  /// Spark without returning to the unblocked app.
+  /// Re-applies the shield immediately and stops DeviceActivity monitoring.
+  static Future<void> reapplyShield(String networkId) async {
+    try {
+      await _channel.invokeMethod('reapplyShield', {'networkId': networkId});
+    } on PlatformException catch (_) {}
+  }
+
   // ── Focus mode ──────────────────────────────────────────────────────────────
 
   /// Activates or deactivates Focus mode.

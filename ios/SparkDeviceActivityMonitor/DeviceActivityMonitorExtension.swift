@@ -60,6 +60,7 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
 
     override func intervalDidEnd(for activity: DeviceActivityName) {
         super.intervalDidEnd(for: activity)
+        logger.debug("[DeviceActivityMonitor] intervalDidEnd: \(activity.rawValue, privacy: .public)")
 
         switch activity {
         case .session: handleSessionExpiry()
@@ -69,13 +70,54 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
         }
     }
 
+    // Fires when the user has spent `threshold` minutes inside the monitored app.
+    // activity = "spark.session.<networkId>", event = "spark.unlock.<networkId>"
+    override func eventDidReachThreshold(_ event: DeviceActivityEvent.Name, activity: DeviceActivityName) {
+        super.eventDidReachThreshold(event, activity: activity)
+        logger.debug("[DeviceActivityMonitor] eventDidReachThreshold: activity=\(activity.rawValue, privacy: .public) event=\(event.rawValue, privacy: .public)")
+
+        DeviceActivityCenter().stopMonitoring([activity])
+
+        var d = AppGroupStore.read()
+        let now = Date().timeIntervalSince1970
+
+        // Stamp accurate end time (usage-based, may differ slightly from wall-clock endTime)
+        let startTime = d[K.sessionStartTime] as? Double ?? 0.0
+        if startTime > 0 {
+            d[K.sessionEndTime] = now
+            AppGroupStore.write(d)
+            saveSessionToHistory(d)
+        }
+
+        // Clear all session state (including paused keys — otherwise handleSessionResumeIfNeeded
+        // in AppDelegate will resurrect the session when Spark next becomes active)
+        d[K.sessionEndTime]   = 0.0
+        d[K.sessionStartTime] = 0.0
+        d[K.sessionPausedAt]  = 0.0
+        d[K.sessionRemainingMs] = 0.0
+        d.removeValue(forKey: K.sessionNetworkId)
+        AppGroupStore.write(d)
+
+        applyMonitoredShield(d)
+        logger.debug("[DeviceActivityMonitor] eventDidReachThreshold: session closed, shield re-applied")
+    }
+
     // MARK: - spark.session expired → reblock the monitored app
 
     private func handleSessionExpiry() {
         let s = AppGroupStore.read()
         let endTime = s[K.sessionEndTime] as? Double ?? 0.0
-        guard endTime > 0 else { return }
-        guard Date().timeIntervalSince1970 >= endTime - 5 else { return }
+        let now = Date().timeIntervalSince1970
+        logger.debug("[DeviceActivityMonitor] handleSessionExpiry: endTime=\(endTime) now=\(now)")
+
+        guard endTime > 0 else {
+            logger.debug("[DeviceActivityMonitor] handleSessionExpiry: no active session (endTime=0), skipping")
+            return
+        }
+        guard now >= endTime - 5 else {
+            logger.debug("[DeviceActivityMonitor] handleSessionExpiry: fired too early (delta=\(endTime - now)s), skipping")
+            return
+        }
 
         saveSessionToHistory(s)
         applyMonitoredShield(s)
@@ -85,6 +127,7 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
 
     private func silentReset() {
         var d = AppGroupStore.read()
+        let networkId = d[K.sessionNetworkId] as? String ?? ""
         d[K.sessionEndTime]          = 0.0
         d[K.sessionStartTime]        = 0.0
         d[K.sessionPausedAt]         = 0.0
@@ -93,8 +136,12 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
         d.removeValue(forKey: K.sessionNetworkId)
         AppGroupStore.write(d)
 
-        DeviceActivityCenter().stopMonitoring([.session])
-        // Re-apply the shield on all monitored apps (permanent shield architecture)
+        let center = DeviceActivityCenter()
+        // Stop both old (.session) and new-style ("spark.session.<networkId>") activity if present
+        center.stopMonitoring([.session])
+        if !networkId.isEmpty {
+            center.stopMonitoring([DeviceActivityName("spark.session.\(networkId)")])
+        }
         applyMonitoredShield(d)
         logger.debug("[DeviceActivityMonitor] silentReset complete, sessionCancelledPending written")
     }
@@ -114,12 +161,22 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
     // MARK: - ManagedSettings
 
     private func applyMonitoredShield(_ store: [String: Any]) {
-        guard let data = store[K.monitoredTokens] as? Data,
-              let selection = decodeSelection(from: data),
-              !selection.applicationTokens.isEmpty
-        else { return }
+        guard let data = store[K.monitoredTokens] as? Data else {
+            logger.error("[DeviceActivityMonitor] applyMonitoredShield: KEY_MONITORED_TOKENS missing from store")
+            return
+        }
+        guard let selection = decodeSelection(from: data) else {
+            logger.error("[DeviceActivityMonitor] applyMonitoredShield: decode failed (\(data.count)B)")
+            return
+        }
+        guard !selection.applicationTokens.isEmpty else {
+            logger.debug("[DeviceActivityMonitor] applyMonitoredShield: selection is empty, nothing to shield")
+            return
+        }
 
         managedStore.shield.applications = selection.applicationTokens
+        let readBack = managedStore.shield.applications?.count ?? 0
+        logger.debug("[DeviceActivityMonitor] applyMonitoredShield: wrote \(selection.applicationTokens.count) tokens → store read-back: \(readBack) tokens")
     }
 
     private func decodeSelection(from data: Data) -> FamilyActivitySelection? {
