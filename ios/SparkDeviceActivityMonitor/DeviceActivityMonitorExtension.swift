@@ -58,30 +58,70 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
 
     // MARK: - DeviceActivityMonitor callbacks
 
+    override func intervalDidStart(for activity: DeviceActivityName) {
+        super.intervalDidStart(for: activity)
+
+        guard activity.rawValue.hasPrefix("spark.watchdog.") else { return }
+        let networkId = String(activity.rawValue.dropFirst("spark.watchdog.".count))
+        logger.debug("[Watchdog] intervalDidStart fired for spark.watchdog.\(networkId, privacy: .public)")
+
+        let d       = AppGroupStore.read()
+        let endTime = d[K.sessionEndTime] as? Double ?? 0.0
+        let now     = Date().timeIntervalSince1970
+
+        guard endTime > 0 else {
+            logger.debug("[Watchdog] no active session, stopping")
+            DeviceActivityCenter().stopMonitoring([activity])
+            return
+        }
+
+        if now >= endTime {
+            var d2 = d
+            saveSessionToHistory(d2)
+
+            let center = DeviceActivityCenter()
+            center.stopMonitoring([activity])
+            center.stopMonitoring([DeviceActivityName("spark.session.\(networkId)")])
+
+            d2[K.sessionEndTime]     = 0.0
+            d2[K.sessionStartTime]   = 0.0
+            d2[K.sessionPausedAt]    = 0.0
+            d2[K.sessionRemainingMs] = 0.0
+            d2.removeValue(forKey: K.sessionNetworkId)
+            AppGroupStore.write(d2)
+
+            applyMonitoredShield(d2)
+            logger.debug("[Watchdog] session expired → shield re-applied")
+        } else {
+            rescheduleWatchdog(networkId: networkId)
+            logger.debug("[Watchdog] session still active → rescheduled")
+        }
+    }
+
     override func intervalDidEnd(for activity: DeviceActivityName) {
         super.intervalDidEnd(for: activity)
-        logger.debug("[DeviceActivityMonitor] intervalDidEnd: \(activity.rawValue, privacy: .public)")
 
         switch activity {
         case .session: handleSessionExpiry()
         case .pause45: silentReset()
         case .block5:  handleBlock5Expiry()
-        default:       break
+        default: break
         }
     }
 
-    // Fires when the user has spent `threshold` minutes inside the monitored app.
-    // activity = "spark.session.<networkId>", event = "spark.unlock.<networkId>"
     override func eventDidReachThreshold(_ event: DeviceActivityEvent.Name, activity: DeviceActivityName) {
         super.eventDidReachThreshold(event, activity: activity)
         logger.debug("[DeviceActivityMonitor] eventDidReachThreshold: activity=\(activity.rawValue, privacy: .public) event=\(event.rawValue, privacy: .public)")
 
-        DeviceActivityCenter().stopMonitoring([activity])
+        // spark.unlock.* → cumulative usage threshold reached → end session.
+        let networkId = String(event.rawValue.dropFirst("spark.unlock.".count))
+        let center    = DeviceActivityCenter()
+        center.stopMonitoring([activity])
+        center.stopMonitoring([DeviceActivityName("spark.watchdog.\(networkId)")])
 
         var d = AppGroupStore.read()
         let now = Date().timeIntervalSince1970
 
-        // Stamp accurate end time (usage-based, may differ slightly from wall-clock endTime)
         let startTime = d[K.sessionStartTime] as? Double ?? 0.0
         if startTime > 0 {
             d[K.sessionEndTime] = now
@@ -89,17 +129,37 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
             saveSessionToHistory(d)
         }
 
-        // Clear all session state (including paused keys — otherwise handleSessionResumeIfNeeded
-        // in AppDelegate will resurrect the session when Spark next becomes active)
-        d[K.sessionEndTime]   = 0.0
-        d[K.sessionStartTime] = 0.0
-        d[K.sessionPausedAt]  = 0.0
+        d[K.sessionEndTime]     = 0.0
+        d[K.sessionStartTime]   = 0.0
+        d[K.sessionPausedAt]    = 0.0
         d[K.sessionRemainingMs] = 0.0
         d.removeValue(forKey: K.sessionNetworkId)
         AppGroupStore.write(d)
 
         applyMonitoredShield(d)
-        logger.debug("[DeviceActivityMonitor] eventDidReachThreshold: session closed, shield re-applied")
+        logger.debug("[DeviceActivityMonitor] eventDidReachThreshold: usage threshold reached — session closed, shield re-applied")
+    }
+
+    // MARK: - Watchdog helpers
+
+    private func rescheduleWatchdog(networkId: String) {
+        let activityName = DeviceActivityName("spark.watchdog.\(networkId)")
+        let center       = DeviceActivityCenter()
+        center.stopMonitoring([activityName])
+
+        let cal        = Calendar.current
+        let startComps = cal.dateComponents([.year, .month, .day, .hour, .minute, .second],
+                                            from: Date().addingTimeInterval(15 * 60))
+        let endComps   = cal.dateComponents([.year, .month, .day, .hour, .minute, .second],
+                                            from: Date().addingTimeInterval(30 * 60))
+
+        let schedule = DeviceActivitySchedule(intervalStart: startComps, intervalEnd: endComps, repeats: false)
+
+        do {
+            try center.startMonitoring(activityName, during: schedule)
+        } catch let err as NSError {
+            logger.error("[DeviceActivityMonitor] rescheduleWatchdog: FAILED domain=\(err.domain, privacy: .public) code=\(err.code, privacy: .public) — \(err.localizedDescription, privacy: .public)")
+        }
     }
 
     // MARK: - spark.session expired → reblock the monitored app
@@ -108,12 +168,8 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
         let s = AppGroupStore.read()
         let endTime = s[K.sessionEndTime] as? Double ?? 0.0
         let now = Date().timeIntervalSince1970
-        logger.debug("[DeviceActivityMonitor] handleSessionExpiry: endTime=\(endTime) now=\(now)")
 
-        guard endTime > 0 else {
-            logger.debug("[DeviceActivityMonitor] handleSessionExpiry: no active session (endTime=0), skipping")
-            return
-        }
+        guard endTime > 0 else { return }
         guard now >= endTime - 5 else {
             logger.debug("[DeviceActivityMonitor] handleSessionExpiry: fired too early (delta=\(endTime - now)s), skipping")
             return
@@ -137,10 +193,10 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
         AppGroupStore.write(d)
 
         let center = DeviceActivityCenter()
-        // Stop both old (.session) and new-style ("spark.session.<networkId>") activity if present
         center.stopMonitoring([.session])
         if !networkId.isEmpty {
             center.stopMonitoring([DeviceActivityName("spark.session.\(networkId)")])
+            center.stopMonitoring([DeviceActivityName("spark.watchdog.\(networkId)")])
         }
         applyMonitoredShield(d)
         logger.debug("[DeviceActivityMonitor] silentReset complete, sessionCancelledPending written")

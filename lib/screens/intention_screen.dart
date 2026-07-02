@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../core/theme.dart';
 import '../core/constants.dart';
-import '../services/storage_service.dart';
+import '../widgets/hold_button.dart';
 
 class IntentionScreen extends StatefulWidget {
   final String networkId;
@@ -38,13 +38,9 @@ class _IntentionScreenState extends State<IntentionScreen> {
     });
   }
 
-  String get _proceedLabel =>
-      _selected?.closesApp == true ? 'Ok, je referme' : 'Entrer quand même';
-
   @override
   Widget build(BuildContext context) {
-    final firstName = StorageService.firstName;
-    final greeting = firstName.isEmpty ? 'Salut !' : 'Salut $firstName !';
+    final closesApp = _selected?.closesApp == true;
 
     return Scaffold(
       backgroundColor: AppColors.bgPrimary,
@@ -55,17 +51,9 @@ class _IntentionScreenState extends State<IntentionScreen> {
             // ── Header ──
             Padding(
               padding: const EdgeInsets.fromLTRB(22, 48, 22, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(greeting, style: AppTextStyles.titleLarge),
-                  const SizedBox(height: 8),
-                  Text(
-                    '${AppStrings.intentionSubtitlePrefix}$_networkName'
-                    '${AppStrings.intentionSubtitleSuffix}',
-                    style: AppTextStyles.body,
-                  ),
-                ],
+              child: Text(
+                'Pourquoi tu ouvres $_networkName ?',
+                style: AppTextStyles.titleLarge,
               ),
             ),
             const SizedBox(height: 24),
@@ -94,14 +82,28 @@ class _IntentionScreenState extends State<IntentionScreen> {
                 children: [
                   SizedBox(
                     width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _selected != null ? _onProceed : null,
-                      style: ElevatedButton.styleFrom(
-                        disabledBackgroundColor: AppColors.bgCardSurface,
-                        disabledForegroundColor: AppColors.textMuted,
-                      ),
-                      child: Text(_proceedLabel),
-                    ),
+                    child: _selected == null
+                        // Rien de sélectionné → bouton grisé
+                        ? ElevatedButton(
+                            onPressed: null,
+                            style: ElevatedButton.styleFrom(
+                              disabledBackgroundColor: AppColors.bgCardSurface,
+                              disabledForegroundColor: AppColors.textMuted,
+                            ),
+                            child: const Text('Entrer quand même'),
+                          )
+                        : closesApp
+                            // "L'habitude" → appui simple
+                            ? ElevatedButton(
+                                onPressed: _onProceed,
+                                child: const Text('Ok, je referme'),
+                              )
+                            // Vraie intention → hold 1 seconde
+                            : HoldButton(
+                                label: 'Entrer quand même',
+                                duration: const Duration(seconds: 1),
+                                onComplete: _onProceed,
+                              ),
                   ),
                   const SizedBox(height: 12),
                   SizedBox(

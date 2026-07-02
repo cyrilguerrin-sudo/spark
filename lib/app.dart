@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -21,20 +20,12 @@ class SparkApp extends ConsumerStatefulWidget {
   ConsumerState<SparkApp> createState() => _SparkAppState();
 }
 
-class _SparkAppState extends ConsumerState<SparkApp> with WidgetsBindingObserver {
+class _SparkAppState extends ConsumerState<SparkApp> {
   static const _channel = MethodChannel('com.example.spark/permissions');
-
-  // 45-second inactivity timer: fires when user is in Spark during an active
-  // iOS session without returning to the unblocked app.
-  Timer? _inactivityTimer;
-  // Tracks previous lifecycle state to distinguish paused→resumed (left another
-  // app) from inactive→resumed (dismissed notification center / control center).
-  AppLifecycleState? _prevLifecycle;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     _channel.setMethodCallHandler(_handleNativeCall);
     MonitorService.start();
     if (Platform.isIOS) FamilyControlsService.init();
@@ -47,56 +38,6 @@ class _SparkAppState extends ConsumerState<SparkApp> with WidgetsBindingObserver
       _syncConfig();
     });
   }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _inactivityTimer?.cancel();
-    super.dispose();
-  }
-
-  // ── 45-second inactivity timer (iOS only) ────────────────────────────────────
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (!Platform.isIOS) {
-      _prevLifecycle = state;
-      return;
-    }
-
-    final session = ref.read(sessionTimerProvider);
-
-    if (state == AppLifecycleState.resumed) {
-      // Only trigger when coming from paused (left another app → returned to Spark).
-      // Ignore inactive→resumed (notification center, control center dismissal).
-      if (_prevLifecycle == AppLifecycleState.paused && session.isActive) {
-        _startInactivityTimer(session.networkId);
-      }
-    } else if (state == AppLifecycleState.paused) {
-      // User left Spark (presumably back to the session app) → cancel timer.
-      _cancelInactivityTimer();
-    }
-
-    _prevLifecycle = state;
-  }
-
-  void _startInactivityTimer(String networkId) {
-    _inactivityTimer?.cancel();
-    _inactivityTimer = Timer(const Duration(seconds: 45), () {
-      FamilyControlsService.reapplyShield(networkId);
-      ref.read(sessionTimerProvider.notifier).reset();
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        appRouter.go('/session-end', extra: {'networkId': networkId});
-      });
-    });
-  }
-
-  void _cancelInactivityTimer() {
-    _inactivityTimer?.cancel();
-    _inactivityTimer = null;
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────────
 
   /// Appelé par AppMonitorService (via MainActivity).
   /// Deux événements possibles :

@@ -24,7 +24,7 @@ class AppInterceptedEvent extends IoNativeEvent {
   AppInterceptedEvent(this.networkId);
 }
 
-/// Swift called onSessionCancelled: 45-second inactivity watchdog fired.
+/// Swift called onSessionCancelled: the pause grace period expired.
 /// Flutter should reset the session timer without navigating.
 class SessionCancelledEvent extends IoNativeEvent {}
 
@@ -153,15 +153,6 @@ class FamilyControlsService {
   static Future<void> clearSessionEndTime() async {
     try {
       await _channel.invokeMethod('clearSessionEndTime');
-    } on PlatformException catch (_) {}
-  }
-
-  /// Called by the Flutter 45-second inactivity timer when the user stayed in
-  /// Spark without returning to the unblocked app.
-  /// Re-applies the shield immediately and stops DeviceActivity monitoring.
-  static Future<void> reapplyShield(String networkId) async {
-    try {
-      await _channel.invokeMethod('reapplyShield', {'networkId': networkId});
     } on PlatformException catch (_) {}
   }
 

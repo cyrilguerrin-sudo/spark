@@ -4,8 +4,14 @@ import '../core/theme.dart';
 class HoldButton extends StatefulWidget {
   final String label;
   final VoidCallback onComplete;
+  final Duration duration;
 
-  const HoldButton({super.key, required this.label, required this.onComplete});
+  const HoldButton({
+    super.key,
+    required this.label,
+    required this.onComplete,
+    this.duration = const Duration(seconds: 2),
+  });
 
   @override
   State<HoldButton> createState() => _HoldButtonState();
@@ -21,7 +27,7 @@ class _HoldButtonState extends State<HoldButton>
     super.initState();
     _ctrl = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 2),
+      duration: widget.duration,
     );
     _ctrl.addStatusListener((s) {
       if (s == AnimationStatus.completed) widget.onComplete();

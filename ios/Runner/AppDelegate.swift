@@ -159,7 +159,6 @@ enum UDKey {
         case "getConfiguredNetworks": getConfiguredNetworks(result: result)
         case "setSessionEndTime":       setSessionEndTime(call: call, result: result)
         case "clearSessionEndTime":     clearSessionEndTime(result: result)
-        case "reapplyShield":           reapplyShield(call: call, result: result)
         case "setFocusMode":            setFocusMode(call: call, result: result)
         case "getSessionHistory":       getSessionHistory(result: result)
         case "getMonitoredAppsCount":   getMonitoredAppsCount(result: result)
@@ -324,6 +323,18 @@ enum UDKey {
         let durationMinutes = max(1, Int(round((endTime - startTime) / 60)))
 
         var d = AppGroupStore.read()
+
+        // If a session for a DIFFERENT network is already running, stop its monitors
+        // before overwriting the stored networkId. Same-network monitors are stopped
+        // inside scheduleSessionEvent / scheduleWatchdog themselves.
+        let previousNetworkId = d[UDKey.sessionNetworkId] as? String ?? ""
+        if !previousNetworkId.isEmpty, previousNetworkId != networkId {
+            let center = DeviceActivityCenter()
+            center.stopMonitoring([DeviceActivityName("spark.session.\(previousNetworkId)")])
+            center.stopMonitoring([DeviceActivityName("spark.watchdog.\(previousNetworkId)")])
+            logger.debug("[AppDelegate] setSessionEndTime: stopped stale monitors for previous network \(previousNetworkId, privacy: .public)")
+        }
+
         d[UDKey.sessionEndTime]     = endTime
         d[UDKey.sessionNetworkId]   = networkId
         d[UDKey.sessionStartTime]   = startTime
@@ -333,6 +344,7 @@ enum UDKey {
 
         liftShieldForNetwork(networkId: networkId)
         scheduleSessionEvent(networkId: networkId, durationMinutes: durationMinutes)
+        scheduleWatchdog(networkId: networkId)
 
         result(true)
     }
@@ -363,31 +375,6 @@ enum UDKey {
         logger.debug("[AppDelegate] liftShieldForNetwork: \(networkId, privacy: .public) session started, \(remainingTokens.count) other apps still shielded")
     }
 
-    // MARK: - reapplyShield
-    // Called by the Flutter 45-second inactivity timer when the user stayed in
-    // Spark too long during a session. networkId comes from Flutter (avoids
-    // reading AppGroupStore when we already know it).
-    private func reapplyShield(call: FlutterMethodCall, result: FlutterResult) {
-        let args      = call.arguments as? [String: Any] ?? [:]
-        let networkId = args["networkId"] as? String ?? ""
-
-        var d = AppGroupStore.read()
-        let storedNetworkId = networkId.isEmpty ? (d[UDKey.sessionNetworkId] as? String ?? "") : networkId
-        d[UDKey.sessionEndTime]     = 0.0
-        d[UDKey.sessionStartTime]   = 0.0
-        d[UDKey.sessionPausedAt]    = 0.0
-        d[UDKey.sessionRemainingMs] = 0.0
-        d.removeValue(forKey: UDKey.sessionNetworkId)
-        AppGroupStore.write(d)
-
-        if !storedNetworkId.isEmpty {
-            DeviceActivityCenter().stopMonitoring([DeviceActivityName("spark.session.\(storedNetworkId)")])
-        }
-        applyMonitoredShield()
-        logger.debug("[AppDelegate] reapplyShield: networkId=\(storedNetworkId, privacy: .public) — inactivity timeout, shield re-applied")
-        result(true)
-    }
-
     // MARK: - clearSessionEndTime
 
     private func clearSessionEndTime(result: FlutterResult) {
@@ -403,6 +390,7 @@ enum UDKey {
         let center = DeviceActivityCenter()
         if !networkId.isEmpty {
             center.stopMonitoring([DeviceActivityName("spark.session.\(networkId)")])
+            center.stopMonitoring([DeviceActivityName("spark.watchdog.\(networkId)")])
         }
         applyMonitoredShield()
 
@@ -649,6 +637,32 @@ enum UDKey {
             logger.debug("[AppDelegate] scheduleSessionEvent: OK — \(networkId, privacy: .public) threshold=\(durationMinutes)min")
         } catch {
             logger.error("[AppDelegate] scheduleSessionEvent: startMonitoring FAILED — \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    // Schedules a 15-minute watchdog for the session. When intervalDidEnd fires
+    // in the extension, it checks whether the session has expired and either
+    // re-applies the shield or reschedules another 15-minute watchdog.
+    private func scheduleWatchdog(networkId: String) {
+        guard #available(iOS 16.0, *) else { return }
+
+        let activityName = DeviceActivityName("spark.watchdog.\(networkId)")
+        let center       = DeviceActivityCenter()
+        center.stopMonitoring([activityName])
+
+        let cal        = Calendar.current
+        let startComps = cal.dateComponents([.year, .month, .day, .hour, .minute, .second],
+                                            from: Date().addingTimeInterval(15 * 60))
+        let endComps   = cal.dateComponents([.year, .month, .day, .hour, .minute, .second],
+                                            from: Date().addingTimeInterval(30 * 60))
+
+        let schedule = DeviceActivitySchedule(intervalStart: startComps, intervalEnd: endComps, repeats: false)
+
+        do {
+            try center.startMonitoring(activityName, during: schedule)
+            logger.debug("[Watchdog] scheduled — intervalStart=\(startComps.hour ?? -1, privacy: .public)h\(startComps.minute ?? -1, privacy: .public)m\(startComps.second ?? -1, privacy: .public)s intervalEnd=\(endComps.hour ?? -1, privacy: .public)h\(endComps.minute ?? -1, privacy: .public)m\(endComps.second ?? -1, privacy: .public)s")
+        } catch let err as NSError {
+            logger.error("[AppDelegate] scheduleWatchdog: FAILED domain=\(err.domain, privacy: .public) code=\(err.code, privacy: .public) — \(err.localizedDescription, privacy: .public)")
         }
     }
 
