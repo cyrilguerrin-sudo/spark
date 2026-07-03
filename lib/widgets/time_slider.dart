@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../core/theme.dart';
 
 class TimeSlider extends StatelessWidget {
@@ -30,7 +31,13 @@ class TimeSlider extends StatelessWidget {
               min: 0,
               max: maxMinutes.toDouble(),
               divisions: maxMinutes,
-              onChanged: (v) => onChanged(v.round()),
+              onChanged: (v) {
+                final rounded = v.round();
+                if (rounded != value) {
+                  HapticFeedback.selectionClick();
+                }
+                onChanged(rounded);
+              },
             ),
           ),
         ),

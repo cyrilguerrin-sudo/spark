@@ -19,10 +19,16 @@ class EditScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: AppColors.bgPrimary,
       body: SafeArea(
-        child: Column(
+        child: Stack(
           children: [
-            Expanded(
+            // Fills the whole screen so scrolled content passes underneath the
+            // floating nav bar instead of hard-stopping at its top edge — lets
+            // the Liquid Glass bar show blurred content through it while
+            // scrolling. Bottom padding keeps real content clear of the bar
+            // once scrolled to the end.
+            Positioned.fill(
               child: SingleChildScrollView(
+                padding: const EdgeInsets.only(bottom: 120),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
@@ -69,12 +75,17 @@ class EditScreen extends ConsumerWidget {
             ),
 
             // ── Bottom nav ──
-            SparkBottomNav(
-              currentIndex: 1,
-              onTap: (i) {
-                if (i == 0) context.go('/dashboard');
-                if (i == 2) context.go('/profil');
-              },
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: SparkBottomNav(
+                currentIndex: 1,
+                onTap: (i) {
+                  if (i == 0) context.go('/dashboard');
+                  if (i == 2) context.go('/profil');
+                },
+              ),
             ),
           ],
         ),

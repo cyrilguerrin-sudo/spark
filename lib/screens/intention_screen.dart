@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import '../core/theme.dart';
 import '../core/constants.dart';
-import '../widgets/hold_button.dart';
 
 class IntentionScreen extends StatefulWidget {
   final String networkId;
@@ -22,7 +22,8 @@ class _IntentionScreenState extends State<IntentionScreen> {
   List<IntentionOption> get _options =>
       AppNetworks.intentionsFor(widget.networkId);
 
-  void _onProceed() {
+  void _onContinue() {
+    HapticFeedback.mediumImpact();
     final option = _selected!;
 
     // "L'habitude, sans raison" → ferme sans ouvrir, retour dashboard
@@ -40,8 +41,6 @@ class _IntentionScreenState extends State<IntentionScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final closesApp = _selected?.closesApp == true;
-
     return Scaffold(
       backgroundColor: AppColors.bgPrimary,
       body: SafeArea(
@@ -56,22 +55,26 @@ class _IntentionScreenState extends State<IntentionScreen> {
                 style: AppTextStyles.titleLarge,
               ),
             ),
-            const SizedBox(height: 24),
 
-            // ── Options d'intention ──
+            // ── Options d'intention, centrées comme le slider du timer ──
             Expanded(
-              child: ListView.separated(
+              child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 22),
-                itemCount: _options.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 10),
-                itemBuilder: (_, i) {
-                  final option = _options[i];
-                  return _IntentionOption(
-                    option: option,
-                    isSelected: _selected == option,
-                    onTap: () => setState(() => _selected = option),
-                  );
-                },
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final option in _options)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _IntentionOption(
+                          option: option,
+                          isSelected: _selected == option,
+                          onTap: () => setState(() => _selected = option),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
 
@@ -82,28 +85,14 @@ class _IntentionScreenState extends State<IntentionScreen> {
                 children: [
                   SizedBox(
                     width: double.infinity,
-                    child: _selected == null
-                        // Rien de sélectionné → bouton grisé
-                        ? ElevatedButton(
-                            onPressed: null,
-                            style: ElevatedButton.styleFrom(
-                              disabledBackgroundColor: AppColors.bgCardSurface,
-                              disabledForegroundColor: AppColors.textMuted,
-                            ),
-                            child: const Text('Entrer quand même'),
-                          )
-                        : closesApp
-                            // "L'habitude" → appui simple
-                            ? ElevatedButton(
-                                onPressed: _onProceed,
-                                child: const Text('Ok, je referme'),
-                              )
-                            // Vraie intention → hold 1 seconde
-                            : HoldButton(
-                                label: 'Entrer quand même',
-                                duration: const Duration(seconds: 1),
-                                onComplete: _onProceed,
-                              ),
+                    child: ElevatedButton(
+                      onPressed: _selected != null ? _onContinue : null,
+                      style: ElevatedButton.styleFrom(
+                        disabledBackgroundColor: AppColors.bgCardSurface,
+                        disabledForegroundColor: AppColors.textMuted,
+                      ),
+                      child: const Text(AppStrings.continueCta),
+                    ),
                   ),
                   const SizedBox(height: 12),
                   SizedBox(

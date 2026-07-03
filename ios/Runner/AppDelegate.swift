@@ -96,6 +96,11 @@ enum UDKey {
             self?.handle(call, result: result)
         }
 
+        if #available(iOS 26.0, *) {
+            let glassFactory = LiquidGlassNavBarFactory(messenger: controller.binaryMessenger)
+            registrar(forPlugin: "LiquidGlassNavBar")?.register(glassFactory, withId: "spark/liquid_glass_nav_bar")
+        }
+
         return super.application(application, didFinishLaunchingWithOptions: launchOptions)
     }
 
@@ -163,6 +168,7 @@ enum UDKey {
         case "getSessionHistory":       getSessionHistory(result: result)
         case "getMonitoredAppsCount":   getMonitoredAppsCount(result: result)
         case "openScreenTimeSettings":  openScreenTimeSettings(result: result)
+        case "checkLiquidGlassSupport": checkLiquidGlassSupport(result: result)
         default:                        result(FlutterMethodNotImplemented)
         }
     }
@@ -190,8 +196,20 @@ enum UDKey {
 
     // MARK: - checkAuthorization
 
-    private func checkAuthorization(result: FlutterResult) {
-        result(AuthorizationCenter.shared.authorizationStatus == .approved)
+    // authorizationStatus is a @Published property that syncs asynchronously
+    // with the Screen Time daemon — reading it right after process launch or
+    // app resume can report a stale non-approved value even when the user
+    // already granted authorization in a previous session. Fast-path the
+    // common case (already synced), otherwise give it a brief moment to
+    // settle before trusting a negative read.
+    private func checkAuthorization(result: @escaping FlutterResult) {
+        if AuthorizationCenter.shared.authorizationStatus == .approved {
+            result(true)
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            result(AuthorizationCenter.shared.authorizationStatus == .approved)
+        }
     }
 
     // MARK: - setMonitoredNetwork
@@ -467,6 +485,16 @@ enum UDKey {
               let selection = decodePerNetworkSelection(from: data)
         else { result(0); return }
         result(selection.applicationTokens.count)
+    }
+
+    // MARK: - checkLiquidGlassSupport
+
+    private func checkLiquidGlassSupport(result: FlutterResult) {
+        if #available(iOS 26.0, *) {
+            result(true)
+        } else {
+            result(false)
+        }
     }
 
     // MARK: - openScreenTimeSettings

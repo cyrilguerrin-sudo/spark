@@ -1,12 +1,37 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/theme.dart';
+import '../providers/liquid_glass_support_provider.dart';
+import 'liquid_glass_bottom_nav.dart';
 
-class SparkBottomNav extends StatelessWidget {
+/// Dispatches to the native Liquid Glass nav bar on iOS 26+, falling back to
+/// [_LegacyBottomNav] everywhere else (older iOS, Android, or while the
+/// support check is still resolving).
+class SparkBottomNav extends ConsumerWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
 
   const SparkBottomNav({
     super.key,
+    required this.currentIndex,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final supportsGlass = ref.watch(liquidGlassSupportProvider);
+    if (supportsGlass.value == true) {
+      return LiquidGlassBottomNav(currentIndex: currentIndex, onTap: onTap);
+    }
+    return _LegacyBottomNav(currentIndex: currentIndex, onTap: onTap);
+  }
+}
+
+class _LegacyBottomNav extends StatelessWidget {
+  final int currentIndex;
+  final ValueChanged<int> onTap;
+
+  const _LegacyBottomNav({
     required this.currentIndex,
     required this.onTap,
   });

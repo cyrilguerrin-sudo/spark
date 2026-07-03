@@ -1,3 +1,4 @@
+import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 import '../screens/splash_screen.dart';
 import '../screens/permissions_screen.dart';
@@ -12,6 +13,18 @@ import '../screens/focus_config_screen.dart';
 import '../screens/focus_blocked_screen.dart';
 import '../screens/network_selection_screen.dart';
 import '../screens/session_started_screen.dart';
+
+/// No slide-in-from-the-right — used for the bottom-tab screens (dashboard,
+/// profil) so switching tabs just shows the destination instantly, like a
+/// tab switch, instead of a hierarchical push animation.
+CustomTransitionPage<void> _tabPage(Widget child) {
+  return CustomTransitionPage<void>(
+    child: child,
+    transitionDuration: Duration.zero,
+    reverseTransitionDuration: Duration.zero,
+    transitionsBuilder: (_, __, ___, child) => child,
+  );
+}
 
 final appRouter = GoRouter(
   initialLocation: '/',
@@ -34,12 +47,12 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/dashboard',
       name: 'dashboard',
-      builder: (context, state) => const DashboardScreen(),
+      pageBuilder: (context, state) => _tabPage(const DashboardScreen()),
     ),
     GoRoute(
       path: '/profil',
       name: 'profil',
-      builder: (context, state) => const ProfilScreen(),
+      pageBuilder: (context, state) => _tabPage(const ProfilScreen()),
     ),
     // extra: {'networkId': String}
     GoRoute(

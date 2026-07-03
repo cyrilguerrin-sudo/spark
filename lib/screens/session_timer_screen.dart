@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../core/theme.dart';
@@ -9,6 +10,7 @@ import '../providers/sessions_provider.dart';
 import '../providers/session_timer_provider.dart';
 import '../services/app_blocker_service.dart';
 import '../services/family_controls_service.dart';
+import '../widgets/hold_button.dart';
 import '../widgets/time_slider.dart';
 
 class SessionTimerScreen extends ConsumerStatefulWidget {
@@ -79,14 +81,14 @@ class _SessionTimerScreenState extends ConsumerState<SessionTimerScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Bouton retour ──
-            IconButton(
-              icon: const Icon(
-                Icons.arrow_back,
-                color: AppColors.textPrimary,
-                size: 22,
+            // ── Titre — même style/emplacement que "Salut !" et
+            // "Pourquoi tu ouvres X ?" ──
+            Padding(
+              padding: const EdgeInsets.fromLTRB(22, 48, 22, 0),
+              child: Text(
+                AppStrings.timerQuestion,
+                style: AppTextStyles.titleLarge,
               ),
-              onPressed: () => context.pop(),
             ),
 
             // ── Contenu centré ──
@@ -97,12 +99,6 @@ class _SessionTimerScreenState extends ConsumerState<SessionTimerScreen> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      AppStrings.timerQuestion,
-                      style: AppTextStyles.body,
-                    ),
-                    const SizedBox(height: 28),
-
                     // Slider + valeur
                     Container(
                       padding: const EdgeInsets.symmetric(
@@ -126,19 +122,45 @@ class _SessionTimerScreenState extends ConsumerState<SessionTimerScreen> {
               ),
             ),
 
-            // ── Bouton lancer ──
+            // ── Boutons bas ──
             Padding(
-              padding: const EdgeInsets.fromLTRB(22, 0, 22, 36),
-              child: SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _selectedMinutes > 0 ? _launchSession : null,
-                  style: ElevatedButton.styleFrom(
-                    disabledBackgroundColor: AppColors.bgCardSurface,
-                    disabledForegroundColor: AppColors.textMuted,
+              padding: const EdgeInsets.fromLTRB(22, 16, 22, 36),
+              child: Column(
+                children: [
+                  SizedBox(
+                    width: double.infinity,
+                    // Grisé tant qu'aucune durée n'est choisie, sinon jauge
+                    // 2 secondes (défaut de HoldButton) pour lancer.
+                    child: _selectedMinutes == 0
+                        ? ElevatedButton(
+                            onPressed: null,
+                            style: ElevatedButton.styleFrom(
+                              disabledBackgroundColor: AppColors.bgCardSurface,
+                              disabledForegroundColor: AppColors.textMuted,
+                            ),
+                            child: const Text(AppStrings.timerLaunch),
+                          )
+                        : HoldButton(
+                            label: AppStrings.timerLaunch,
+                            onHoldStart: () => HapticFeedback.lightImpact(),
+                            onComplete: () {
+                              HapticFeedback.heavyImpact();
+                              _launchSession();
+                            },
+                          ),
                   ),
-                  child: const Text(AppStrings.timerLaunch),
-                ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: TextButton(
+                      onPressed: () => context.go('/dashboard'),
+                      child: Text(
+                        AppStrings.intentionClose,
+                        style: AppTextStyles.body,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],

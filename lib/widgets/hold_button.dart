@@ -5,12 +5,14 @@ class HoldButton extends StatefulWidget {
   final String label;
   final VoidCallback onComplete;
   final Duration duration;
+  final VoidCallback? onHoldStart;
 
   const HoldButton({
     super.key,
     required this.label,
     required this.onComplete,
     this.duration = const Duration(seconds: 2),
+    this.onHoldStart,
   });
 
   @override
@@ -42,6 +44,7 @@ class _HoldButtonState extends State<HoldButton>
 
   void _onTapDown(TapDownDetails _) {
     setState(() => _pressing = true);
+    widget.onHoldStart?.call();
     _ctrl.forward();
   }
 

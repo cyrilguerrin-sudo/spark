@@ -128,6 +128,20 @@ class FamilyControlsService {
     } catch (_) {}
   }
 
+  // ── Liquid Glass ─────────────────────────────────────────────────────────────
+
+  /// Returns true if the device supports the native Liquid Glass material
+  /// (iOS 26+). Used to pick between [LiquidGlassBottomNav] and the legacy
+  /// Flutter-drawn nav bar.
+  static Future<bool> supportsLiquidGlass() async {
+    if (!Platform.isIOS) return false;
+    try {
+      return await _channel.invokeMethod<bool>('checkLiquidGlassSupport') ?? false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
   // ── Session lifecycle ───────────────────────────────────────────────────────
 
   /// Starts a session: removes the ManagedSettings shield from the monitored

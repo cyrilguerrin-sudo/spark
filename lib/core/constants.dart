@@ -44,6 +44,7 @@ class AppStrings {
   ];
   static const String intentionClose = 'Fermer';
   static const String intentionProceed = 'Entrer quand même';
+  static const String continueCta = 'Continuer';
 
   // Timer de session
   static const String timerQuestion = 'Combien de temps tu te donnes ?';

@@ -88,11 +88,22 @@ class _PermissionsScreenState extends State<PermissionsScreen>
   // ── iOS logic ──────────────────────────────────────────────────────────────
 
   Future<void> _checkIosPermissions() async {
-    final auth = await FamilyControlsService.checkAuthorization();
+    var auth = await FamilyControlsService.checkAuthorization();
     if (!mounted) return;
+
     if (!auth && StorageService.familyControlsAuthorized) {
-      await StorageService.setFamilyControlsAuthorized(false);
+      // A single negative read can be a transient race on the native side
+      // (authorizationStatus syncs asynchronously after launch/resume) —
+      // confirm with a second check before downgrading a previously-granted
+      // authorization, so we don't wipe valid state on a momentary blip.
+      final confirmed = await FamilyControlsService.checkAuthorization();
+      if (!mounted) return;
+      auth = confirmed;
+      if (!auth) {
+        await StorageService.setFamilyControlsAuthorized(false);
+      }
     }
+
     final networks = auth
         ? await FamilyControlsService.getConfiguredNetworks()
         : <String>[];

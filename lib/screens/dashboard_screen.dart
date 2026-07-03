@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../core/theme.dart';
@@ -51,6 +54,7 @@ class _NormalDashboard extends StatefulWidget {
 class _NormalDashboardState extends State<_NormalDashboard>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
+  Timer? _hapticTimer;
 
   @override
   void initState() {
@@ -61,14 +65,44 @@ class _NormalDashboardState extends State<_NormalDashboard>
     );
     _ctrl.addStatusListener((s) {
       if (s == AnimationStatus.completed && mounted) {
+        _hapticTimer?.cancel();
+        HapticFeedback.heavyImpact();
         _ctrl.reverse();
         context.go('/network-select');
       }
     });
   }
 
+  // Vibration progressive pendant le hold : l'intensité et la cadence
+  // augmentent avec le remplissage de la jauge (0-40% léger/300ms,
+  // 40-70% moyen/200ms, 70-100% fort/100ms). S'arrête d'elle-même dès que
+  // le controller quitte l'état "forward" (relâché ou terminé).
+  void _fireHapticLoop() {
+    if (_ctrl.status != AnimationStatus.forward) return;
+
+    final t = _ctrl.value;
+    final Duration interval;
+    if (t < 0.4) {
+      HapticFeedback.lightImpact();
+      interval = const Duration(milliseconds: 300);
+    } else if (t < 0.7) {
+      HapticFeedback.mediumImpact();
+      interval = const Duration(milliseconds: 200);
+    } else {
+      HapticFeedback.heavyImpact();
+      interval = const Duration(milliseconds: 100);
+    }
+    _hapticTimer = Timer(interval, _fireHapticLoop);
+  }
+
+  void _stopHaptic() {
+    _hapticTimer?.cancel();
+    _hapticTimer = null;
+  }
+
   @override
   void dispose() {
+    _hapticTimer?.cancel();
     _ctrl.dispose();
     super.dispose();
   }
@@ -109,10 +143,19 @@ class _NormalDashboardState extends State<_NormalDashboard>
                         children: [
                           // ── Flamme interactive (hold 2s → session) ──
                           GestureDetector(
-                            onLongPressStart: (_) => _ctrl.forward(),
+                            onLongPressStart: (_) {
+                              _ctrl.forward();
+                              _fireHapticLoop();
+                            },
                             onLongPressMoveUpdate: (_) {},
-                            onLongPressEnd: (_) => _ctrl.reverse(),
-                            onLongPressCancel: () => _ctrl.reverse(),
+                            onLongPressEnd: (_) {
+                              _stopHaptic();
+                              _ctrl.reverse();
+                            },
+                            onLongPressCancel: () {
+                              _stopHaptic();
+                              _ctrl.reverse();
+                            },
                             child: Transform.scale(
                               scale: 1.0 + 0.15 * t,
                               child: Stack(

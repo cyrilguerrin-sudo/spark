@@ -51,10 +51,20 @@ class _ProfilScreenState extends State<ProfilScreen> {
   Future<void> _checkFamilyControlsState() async {
     final auth = await FamilyControlsService.checkAuthorization();
     if (!mounted) return;
-    if (auth != _hasFamilyControls) {
-      await StorageService.setFamilyControlsAuthorized(auth);
-      setState(() => _hasFamilyControls = auth);
+    if (auth == _hasFamilyControls) return;
+
+    if (!auth) {
+      // A single negative read can be a transient race on the native side
+      // (authorizationStatus syncs asynchronously after launch/resume) —
+      // confirm with a second check before downgrading a previously-granted
+      // authorization, so we don't wipe valid state on a momentary blip.
+      final confirmed = await FamilyControlsService.checkAuthorization();
+      if (!mounted) return;
+      if (confirmed) return;
     }
+
+    await StorageService.setFamilyControlsAuthorized(auth);
+    setState(() => _hasFamilyControls = auth);
   }
 
   Future<void> _loadConfiguredNetworks() async {
@@ -194,11 +204,16 @@ class _ProfilScreenState extends State<ProfilScreen> {
     return Scaffold(
       backgroundColor: AppColors.bgPrimary,
       body: SafeArea(
-        child: Column(
+        child: Stack(
           children: [
-            Expanded(
+            // Fills the whole screen so scrolled content passes underneath the
+            // floating nav bar instead of hard-stopping at its top edge — lets
+            // the Liquid Glass bar show blurred content through it while
+            // scrolling. Bottom padding keeps real content clear of the bar
+            // once scrolled to the end.
+            Positioned.fill(
               child: ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 22),
+                padding: const EdgeInsets.fromLTRB(22, 0, 22, 120),
                 children: [
                   const SizedBox(height: 32),
 
@@ -358,7 +373,7 @@ class _ProfilScreenState extends State<ProfilScreen> {
                       icon: const Icon(Icons.chat_bubble_outline, size: 18),
                       label: const Text('Rejoindre le groupe WhatsApp'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF25D366),
+                        backgroundColor: AppColors.orange,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         textStyle: const TextStyle(
@@ -379,11 +394,16 @@ class _ProfilScreenState extends State<ProfilScreen> {
               ),
             ),
 
-            SparkBottomNav(
-              currentIndex: 1,
-              onTap: (i) {
-                if (i == 0) context.go('/dashboard');
-              },
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: SparkBottomNav(
+                currentIndex: 1,
+                onTap: (i) {
+                  if (i == 0) context.go('/dashboard');
+                },
+              ),
             ),
           ],
         ),
