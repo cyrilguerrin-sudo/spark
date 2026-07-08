@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 54;
+	objectVersion = 70;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -110,21 +110,21 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		3B8654D32FEBF45800265369 /* Exceptions for "SparkShieldConfiguration" folder in "SparkShieldConfiguration" target */ = {
+		3B8654D32FEBF45800265369 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
 			target = 3B8654C42FEBF45800265369 /* SparkShieldConfiguration */;
 		};
-		3B8654E72FEC069600265369 /* Exceptions for "SparkShieldAction" folder in "SparkShieldAction" target */ = {
+		3B8654E72FEC069600265369 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
 			target = 3B8654DC2FEC069600265369 /* SparkShieldAction */;
 		};
-		3B8654FB2FEC06F300265369 /* Exceptions for "SparkDeviceActivityMonitor" folder in "SparkDeviceActivityMonitor" target */ = {
+		3B8654FB2FEC06F300265369 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -134,42 +134,9 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		3B8654CB2FEBF45800265369 /* SparkShieldConfiguration */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				3B8654D32FEBF45800265369 /* Exceptions for "SparkShieldConfiguration" folder in "SparkShieldConfiguration" target */,
-			);
-			explicitFileTypes = {
-			};
-			explicitFolders = (
-			);
-			path = SparkShieldConfiguration;
-			sourceTree = "<group>";
-		};
-		3B8654DF2FEC069600265369 /* SparkShieldAction */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				3B8654E72FEC069600265369 /* Exceptions for "SparkShieldAction" folder in "SparkShieldAction" target */,
-			);
-			explicitFileTypes = {
-			};
-			explicitFolders = (
-			);
-			path = SparkShieldAction;
-			sourceTree = "<group>";
-		};
-		3B8654F32FEC06F300265369 /* SparkDeviceActivityMonitor */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				3B8654FB2FEC06F300265369 /* Exceptions for "SparkDeviceActivityMonitor" folder in "SparkDeviceActivityMonitor" target */,
-			);
-			explicitFileTypes = {
-			};
-			explicitFolders = (
-			);
-			path = SparkDeviceActivityMonitor;
-			sourceTree = "<group>";
-		};
+		3B8654CB2FEBF45800265369 /* SparkShieldConfiguration */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (3B8654D32FEBF45800265369 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = SparkShieldConfiguration; sourceTree = "<group>"; };
+		3B8654DF2FEC069600265369 /* SparkShieldAction */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (3B8654E72FEC069600265369 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = SparkShieldAction; sourceTree = "<group>"; };
+		3B8654F32FEC06F300265369 /* SparkDeviceActivityMonitor */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (3B8654FB2FEC06F300265369 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = SparkDeviceActivityMonitor; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -429,7 +396,7 @@
 			);
 			mainGroup = 97C146E51CF9000F007C117D;
 			packageReferences = (
-				781AD8BC2B33823900A9FFBB /* XCLocalSwiftPackageReference "FlutterGeneratedPluginSwiftPackage" */,
+				781AD8BC2B33823900A9FFBB /* XCLocalSwiftPackageReference "Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage" */,
 			);
 			productRefGroup = 97C146EF1CF9000F007C117D /* Products */;
 			projectDirPath = "";
@@ -678,6 +645,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
 				VERSIONING_SYSTEM = "apple-generic";
 			};
 			name = Profile;
@@ -1223,6 +1191,7 @@
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
 				VERSIONING_SYSTEM = "apple-generic";
 			};
 			name = Debug;
@@ -1246,6 +1215,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
 				VERSIONING_SYSTEM = "apple-generic";
 			};
 			name = Release;
@@ -1316,7 +1286,7 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		781AD8BC2B33823900A9FFBB /* XCLocalSwiftPackageReference "FlutterGeneratedPluginSwiftPackage" */ = {
+		781AD8BC2B33823900A9FFBB /* XCLocalSwiftPackageReference "Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage;
 		};
